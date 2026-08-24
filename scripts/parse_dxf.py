@@ -7,6 +7,12 @@
 import argparse
 import sys
 
+try:
+    from extract_texts_stream import resolve_font, decode_bigfont
+    _HAVE_DECODE = True
+except Exception:
+    _HAVE_DECODE = False
+
 
 def main():
     parser = argparse.ArgumentParser(description="解析 DXF 并输出结构化报告")
@@ -27,6 +33,30 @@ def main():
 
     doc = ezdxf.readfile(args.file)
     msp = doc.modelspace()
+
+    # 建立 样式→字体 缓存，用于解码 BigFont(\M+) / \U+ / %% 转义
+    _font = None
+    _font_cache = None
+    if _HAVE_DECODE:
+        try:
+            _font, _font_cache = resolve_font(None, args.file)
+        except Exception:
+            _font, _font_cache = None, None
+
+    import re as _re
+
+    def _dec(text, style=""):
+        """解码文字：\\M+ 大字体 / \\U+ Unicode / %% 转义；并清理 MTEXT 格式码。"""
+        if not _HAVE_DECODE or not text:
+            return text
+        f = _font
+        if f is None and _font_cache and style in _font_cache:
+            f = _font_cache[style]
+        s = decode_bigfont(text, f)
+        # 清理 MTEXT 残留格式码：\P 换行，\...; 格式指令删除
+        s = s.replace("\\P", "\n").replace("\\p", "\n")
+        s = _re.sub(r"\\[A-Za-z][^;\\\n]*;?", "", s)
+        return s.strip()
 
     # 基础信息
     print(f"== 图纸信息 ==")
@@ -71,12 +101,13 @@ def main():
         n = 0
         for e in msp.query("TEXT MTEXT"):
             n += 1
+            style = getattr(e.dxf, "style", "")
             if e.dxftype() == "MTEXT":
-                content = e.text.replace("\n", "\\n")
+                content = _dec(e.text, style).replace("\n", "\\n")
                 pos = e.dxf.insert
                 print(f"  MTEXT@{pos}: {content[:200]}")
             else:
-                content = e.dxf.text
+                content = _dec(e.dxf.text, style)
                 pos = e.dxf.insert
                 print(f"  TEXT@{pos}: {content[:200]}")
         if n == 0:
@@ -95,9 +126,9 @@ def main():
                 print(f"  ARC[{layer}] 圆心=({e.dxf.center[0]:.2f},{e.dxf.center[1]:.2f}) 半径={e.dxf.radius:.2f} "
                       f"角度={e.dxf.start_angle:.1f}->{e.dxf.end_angle:.1f}")
             elif t == "TEXT":
-                print(f"  TEXT[{layer}] \"{e.dxf.text}\" @({e.dxf.insert[0]:.2f},{e.dxf.insert[1]:.2f}) 高度={e.dxf.height}")
+                print(f"  TEXT[{layer}] \"{_dec(e.dxf.text, getattr(e.dxf, 'style', ''))}\" @({e.dxf.insert[0]:.2f},{e.dxf.insert[1]:.2f}) 高度={e.dxf.height}")
             elif t == "MTEXT":
-                print(f"  MTEXT[{layer}] \"{e.text[:100]}\" @({e.dxf.insert[0]:.2f},{e.dxf.insert[1]:.2f})")
+                print(f"  MTEXT[{layer}] \"{_dec(e.text, getattr(e.dxf, 'style', ''))[:100]}\" @({e.dxf.insert[0]:.2f},{e.dxf.insert[1]:.2f})")
             elif t == "DIMENSION":
                 meas = e.dxf.get("text", "")
                 print(f"  DIMENSION[{layer}] 测量值={e.get_measurement():.2f} 文字=\"{meas}\"")

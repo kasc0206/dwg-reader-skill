@@ -168,6 +168,7 @@ def main():
     cur_entity = None
     cur_content = []
     cur_x = cur_y = 0.0
+    cur_point_done = False  # 是否已捕获本实体的第一对 (10,20) 插入点
     cur_layer = ""
     cur_style = ""
     cur_type = ""
@@ -175,7 +176,7 @@ def main():
     cur_value = None
 
     def flush():
-        nonlocal cur_entity, cur_content, cur_x, cur_y, cur_layer, cur_type, cur_style
+        nonlocal cur_entity, cur_content, cur_x, cur_y, cur_layer, cur_type, cur_style, cur_point_done
         if cur_entity and cur_content:
             # 按文本样式选择字体（自动模式）
             entity_font = font
@@ -188,6 +189,7 @@ def main():
         cur_content = []
         cur_type = ""
         cur_x = cur_y = 0.0
+        cur_point_done = False
         cur_layer = ""
         cur_style = ""
 
@@ -208,22 +210,26 @@ def main():
                 flush()
                 cur_entity = cur_value
                 cur_type = cur_value
+                cur_point_done = False
             elif code == 8:
                 cur_layer = cur_value
             elif code == 7:
                 # 文本样式名（TEXT/MTEXT 的 style 属性）
                 if cur_entity in ("TEXT", "MTEXT"):
                     cur_style = cur_value
-            elif code == 10 and cur_x == 0.0 and cur_y == 0.0:
+            elif code == 10 and not cur_point_done:
+                # 捕获本实体的第一对 (10,20) 作为插入点；
+                # 不判断是否为零，避免 X=0 时 Y 被清零
                 try:
                     cur_x = float(cur_value)
                 except ValueError:
                     pass
-            elif code == 20 and cur_x != 0.0:
+            elif code == 20 and not cur_point_done:
                 try:
                     cur_y = float(cur_value)
                 except ValueError:
                     pass
+                cur_point_done = True
             elif code in (1, 3):
                 if cur_entity in ("TEXT", "MTEXT"):
                     # code 1: TEXT 正文 / MTEXT 首段; code 3: MTEXT 后续段

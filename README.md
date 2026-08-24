@@ -6,7 +6,7 @@
 
 - **DWG → DXF 转换**：通过 ODA File Converter 命令行批量转换
 - **图纸解析**：实体清单（LINE/CIRCLE/ARC/TEXT/MTEXT/DIMENSION 等）、文字提取、图层信息、尺寸信息
-- **全字体支持**：内置 322 个 SHX 字体（约 159MB），覆盖中文 GBK、韩文 cp949、日文 shift_jis、繁中 big5、西文 unifont
+- **全字体支持**：内置 322 个 SHX 字体（约 159MB），覆盖中文 GBK、韩文 cp949、日文 shift_jis、西文 unifont
 - **自动字体匹配**：解析 DXF 的 STYLE 表，按文本样式自动匹配字体库，无需手动指定字体
 - **符号支持**：AutoCAD `%%` 转义序列（%%C→Ø、%%D→°、%%P→±）、`\U+XXXX` Unicode、`\M+5XXXX` bigfont 符号区
 - **SHX 反编译**：大字体 SHX → SHP 文本（等价 DUMPSHX / shx2shp 工具）
@@ -19,7 +19,7 @@
 | ODA File Converter | `/Applications/ODAFileConverter.app`，DWG→DXF 转换 |
 | Python 3.13+ | 运行脚本 |
 | ezdxf | `pip3 install ezdxf` |
-| shxparser | `pip3 install shxparser`（辅助） |
+| SHX 解析器 | 内置 `scripts/shxfont.py`（自研，仅依赖标准库，无需第三方包） |
 
 ## 快速开始
 

@@ -33,7 +33,7 @@ DWG (二进制) → [ODA File Converter] → DXF (纯文本) → [ezdxf] → 解
 | ODA File Converter | `/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter` | 已安装 |
 | Python | python3 (3.13+) | 已安装 |
 | ezdxf | pip 包，v1.4+ | 已安装 |
-| shxparser | pip 包（SHX 线字体解析辅助） | 已安装 |
+| SHX 大字体解析器 | 内置 `scripts/shxfont.py`（自研，仅依赖 Python 标准库，无需第三方包） | 已内置 |
 | 中文字体库 | `fonts/`（322 个 SHX，含 index.json 编码索引） | 已内置 |
 
 > 如果 ezdxf 未安装，执行：`pip3 install ezdxf`
@@ -76,6 +76,10 @@ dwg2dxf("input.dwg", "output.dxf")
 - `extract_texts_stream.py` — 流式提取全部文字（低内存），支持 BigFont 解码
 - `shxfont.py` — SHX 大字体解析器（建立 shape number → 字符映射）
 - `shx_decompile.py` — SHX 反编译为 SHP 文本（等价 DUMPSHX / shx2shp）
+
+> **解码一致性**：上述 BigFont（`\M+`）/ Unicode（`\U+`）/ `%%` 转义解码已接入全部提取脚本
+> （`parse_dxf.py`、`extract_texts.py`、`extract_texts_lowmem.py`、`extract_texts_stream.py`），
+> 均会自动按文本样式匹配 `fonts/` 字体库；无需手动指定字体或预处理。
 
 ### 用法
 
@@ -205,7 +209,7 @@ python3 scripts/extract_texts_stream.py 图纸.dxf out.txt --font fonts/gbcbig.s
 
 `fonts/` 目录内置 322 个 SHX 字体（约 159MB，来自 AutoCAD SHX 字体集合），
 含 `index.json` 索引（字体名 → 类型/编码/shape 数）：
-- bigfont 234 个：中文 GBK（gbcbig/hztxt/tssdchn 等）、韩文 cp949、日文 shift_jis、繁中 big5
+- bigfont 234 个：中文 GBK（gbcbig/hztxt/tssdchn 等）、韩文 cp949、日文 shift_jis
 - unifont 88 个：Unicode 编码（tssdeng 等）
 - 支持常见别名：gbcbig/hztxt/tssdchn/tssdeng 等，大小写不敏感，自动补 `.shx`
 
