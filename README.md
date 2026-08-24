@@ -5,12 +5,19 @@
 ## 核心能力
 
 - **DWG → DXF 转换**：通过 ODA File Converter 命令行批量转换
+- **一站式流水线**：`dwg_read.py` 自动转换 + 结构化报告 + 文字提取，输出 Markdown
 - **图纸解析**：实体清单（LINE/CIRCLE/ARC/TEXT/MTEXT/DIMENSION 等）、文字提取、图层信息、尺寸信息
+- **块内文字与属性**：INSERT 自动展开（含缩放/旋转/镜像变换）、ATTRIB 属性提取、匿名块主体文字直提
+- **表格还原**：`--table` 按几何对齐还原 Markdown 表格（门窗表/材料表）
+- **阅读顺序**：几何感知排序（先分栏、栏内上→下左→右），适配多栏图纸
+- **按图层聚合**：`--by-layer` 按专业图层分组输出
+- **MTEXT 堆叠**：`\S`（分数/公差）解码为 `top/bottom`，剥离 `\H` 高度控制码
 - **全字体支持**：内置 322 个 SHX 字体（约 159MB），覆盖中文 GBK、韩文 cp949、日文 shift_jis、西文 unifont
-- **自动字体匹配**：解析 DXF 的 STYLE 表，按文本样式自动匹配字体库，无需手动指定字体
+- **自动字体匹配**：解析 DXF 的 STYLE 表，按文本样式自动匹配字体库（支持路径前缀/大小写/后缀容错），无需手动指定
 - **符号支持**：AutoCAD `%%` 转义序列（%%C→Ø、%%D→°、%%P→±）、`\U+XXXX` Unicode、`\M+5XXXX` bigfont 符号区
 - **SHX 反编译**：大字体 SHX → SHP 文本（等价 DUMPSHX / shx2shp 工具）
 - **低内存提取**：大 DXF 逐行流式解析，避免 OOM
+- **损坏文件容错**：缺 EOF / 空值 / 嵌套 SECTION / 无 ENTITIES 段等不规范 DXF 均不丢字
 
 ## 环境依赖
 
@@ -22,6 +29,15 @@
 | SHX 解析器 | 内置 `scripts/shxfont.py`（自研，仅依赖标准库，无需第三方包） |
 
 ## 快速开始
+
+### 0. 一站式阅读（推荐）
+
+```bash
+# DWG 或 DXF 均可，DWG 自动转为同目录 DXF 后解析
+python3 scripts/dwg_read.py 图纸.dwg --out 报告.md
+python3 scripts/dwg_read.py 图纸.dxf --table          # 表格还原
+python3 scripts/dwg_read.py 图纸.dxf --by-layer       # 按图层聚合
+```
 
 ### 1. 转换 DWG → DXF
 

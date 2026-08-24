@@ -72,16 +72,33 @@ dwg2dxf("input.dwg", "output.dxf")
 ## 解析脚本
 
 项目内置脚本位于 `scripts/` 目录：
+- `dwg_read.py` — **一站式流水线**（推荐）：自动 DWG→DXF 转换 + 结构化报告 + 文字提取，输出 Markdown 报告
 - `parse_dxf.py` — 解析 DXF 并输出结构化报告（实体清单、文字、图层、块、尺寸）
-- `extract_texts_stream.py` — 流式提取全部文字（低内存），支持 BigFont 解码
+- `extract_texts_stream.py` — 流式提取全部文字（低内存），支持 BigFont 解码、块展开、表格/图层聚合
+- `extract_texts.py` — 基于 ezdxf 的全量文字提取（含块属性 virtual_entities 展开）
 - `shxfont.py` — SHX 大字体解析器（建立 shape number → 字符映射）
 - `shx_decompile.py` — SHX 反编译为 SHP 文本（等价 DUMPSHX / shx2shp）
 
-> **解码一致性**：上述 BigFont（`\M+`）/ Unicode（`\U+`）/ `%%` 转义解码已接入全部提取脚本
-> （`parse_dxf.py`、`extract_texts.py`、`extract_texts_lowmem.py`、`extract_texts_stream.py`），
+> **解码一致性**：BigFont（`\M+`）/ Unicode（`\U+`）/ `%%` 转义 / MTEXT 堆叠（`\S`）解码已接入全部提取脚本
+> （`dwg_read.py`、`parse_dxf.py`、`extract_texts.py`、`extract_texts_stream.py`），
 > 均会自动按文本样式匹配 `fonts/` 字体库；无需手动指定字体或预处理。
 
-### 用法
+### 一站式流水线（推荐）
+
+```bash
+# DWG 或 DXF 均可，DWG 会自动调用 ODA 转为同目录 DXF
+python3 scripts/dwg_read.py <图纸.dwg|图纸.dxf> [--out 报告.md]
+                      [--table] [--by-layer] [--no-convert] [--font 字体.shx]
+
+# 选项
+#   --out 报告.md   写入 Markdown 报告文件（默认打印到 stdout）
+#   --table         以 Markdown 表格还原对齐网格（如门窗表）
+#   --by-layer      按图层聚合输出文字
+#   --no-convert    跳过 DWG→DXF 转换（输入已是 DXF 时加速）
+#   --font          显式指定大字体文件（默认按 STYLE 表自动匹配 fonts/）
+```
+
+### 用法（单脚本）
 
 ```bash
 python3 <skill目录>/scripts/parse_dxf.py <文件.dxf> [--entities] [--texts] [--layers] [--blocks] [--limits]
@@ -212,6 +229,53 @@ python3 scripts/extract_texts_stream.py 图纸.dxf out.txt --font fonts/gbcbig.s
 - bigfont 234 个：中文 GBK（gbcbig/hztxt/tssdchn 等）、韩文 cp949、日文 shift_jis
 - unifont 88 个：Unicode 编码（tssdeng 等）
 - 支持常见别名：gbcbig/hztxt/tssdchn/tssdeng 等，大小写不敏感，自动补 `.shx`
+- STYLE 表字体名带路径前缀（如 `fonts/tssdchn.shx`、`C:\...\x.shx`）会自动取 basename 匹配
+
+### 表格结构化还原（`--table`）
+
+对对齐工整的网格文字（如门窗表、材料表），`extract_texts_stream.py` / `dwg_read.py`
+可用几何聚类（`--table`）还原为 Markdown 表格：
+
+```bash
+python3 scripts/extract_texts_stream.py 图纸.dxf --table
+# 或
+python3 scripts/dwg_read.py 图纸.dxf --table
+```
+
+算法：按 Y 相近聚类出行、X 相近聚类出列，顶部行在上；不足 2×2 时自动回退平铺输出。
+
+### 阅读顺序还原（默认）
+
+文字默认按**几何感知排序**（`reorder_by_columns`）：先按栏（X 聚类）分组，栏内按
+Y 降序（上→下）、X 升序（左→右）。比纯 `(-Y, X)` 更适合多栏图纸，避免左栏与
+右栏同 Y 行交错。
+
+### 按图层聚合（`--by-layer`）
+
+`--by-layer` 按 DXF LAYER 分组输出文字，便于按专业（建筑/结构/水电）分读：
+
+```bash
+python3 scripts/extract_texts_stream.py 图纸.dxf --by-layer
+```
+
+### 块内文字与属性（INSERT / ATTRIB）
+
+- INSERT 块参照自动展开：块定义内 TEXT/MTEXT 按块基点 + 缩放/旋转/镜像变换到世界坐标
+- ATTRIB 块属性随块展开提取
+- 未被 INSERT 引用的块（图纸主体常置于 `*Model_Space` 等匿名块）其内部文字也直接提取，
+  保证无独立 ENTITIES 段或不规范文件不丢字
+
+### MTEXT 堆叠文字（`\S`）
+
+MTEXT 的堆叠分数/公差（`\S top^bottom`、`\S top/bottom`、`\S top#bottom`）解码为
+可读形式（`top/bottom`、`top#bottom`），`{...}` 内的高度控制码（`\H`）自动剥离。
+
+### 损坏 / 不规范 DXF 容错
+
+- 缺 EOF 标签、`0` 后空值（空字符串合法值）等导致 ezdxf 严格解析失败时，
+  `dwg_read.py` 自动降级为流式提取（结果仍可用）
+- BLOCKS 段内游离实体、嵌套 SECTION 均按实体提取，不丢字
+- 文本编码：优先 UTF-8（现代 CAD 通用），失败回退 `$DWGCODEPAGE` 指示的编解码器
 
 ## 解析输出内容
 
@@ -237,9 +301,10 @@ DIMENSION 实体的测量值，对应图纸的尺寸标注。
 ## 注意事项
 
 1. **版本兼容性**：ODA 输出 ACAD2018 DXF 时，ezdxf 可读所有版本（含 R12）。若源文件是 2018+ 版本，仍可无损转换。
-2. **中文字体**：DXF 文字中若含中文，解析时按 UTF-8 处理，可直接输出中文文本。
-3. **块引用**：INSERT 实体默认只显示块名和位置；如需展开块内容，可在脚本中启用 `--explode-blocks`。
-4. **大文件**：超大图纸（>100MB）解析耗时，建议先转 DXF 再用脚本提取。
+2. **中文字体**：DXF 文字优先按 UTF-8 解码，失败回退到 `$DWGCODEPAGE` 编码；含中文可正确输出。
+3. **块引用**：INSERT 默认自动展开块内文字与属性；`parse_dxf.py` 另有 `--explode-blocks` 展开实体清单。
+4. **大文件**：超大图纸（>100MB）建议用 `extract_texts_stream.py` / `dwg_read.py`（逐行流式，低内存）。
 5. **批量转换**：ODA 支持整个目录批量转换，把多个 DWG 放进一个目录即可一次转换。
 6. **坐标单位**：DWG 无强制单位约定，解析时输出原始坐标值，比例关系需结合图纸尺寸标注判断。
 7. **不渲染图片**：按用户偏好，本 skill 只做解析提取（实体/文字/图层/尺寸），不输出 SVG/PNG 渲染图。
+8. **一站式入口**：日常使用直接 `python3 scripts/dwg_read.py 图纸.dwg`，自动转换+报告，无需分步操作。

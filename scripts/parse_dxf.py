@@ -31,7 +31,12 @@ def main():
         print("错误: 未安装 ezdxf，请执行 pip3 install ezdxf", file=sys.stderr)
         sys.exit(1)
 
-    doc = ezdxf.readfile(args.file)
+    try:
+        doc = ezdxf.readfile(args.file, errors="ignore")
+    except Exception as e:
+        print(f"错误: DXF 解析失败（{e}）。该文件可能损坏或缺少 EOF 标签；"
+              f"请改用 extract_texts_stream.py 做流式提取。", file=sys.stderr)
+        sys.exit(2)
     msp = doc.modelspace()
 
     # 建立 样式→字体 缓存，用于解码 BigFont(\M+) / \U+ / %% 转义
@@ -94,23 +99,55 @@ def main():
             if block.name.startswith("*"):
                 continue
             ents = list(block)
-            print(f"  {block.name}: {len(ents)} 个实体, 基点=({block.block_layout.block.dxf.base_point})")
+            try:
+                bp = block.base_point
+            except Exception:
+                bp = (0.0, 0.0, 0.0)
+            print(f"  {block.name}: {len(ents)} 个实体, 基点=({bp})")
 
     if args.texts:
         print(f"\n== 文字标注 ==")
-        n = 0
-        for e in msp.query("TEXT MTEXT"):
-            n += 1
-            style = getattr(e.dxf, "style", "")
-            if e.dxftype() == "MTEXT":
+        cnt = [0]
+
+        def emit(text, pos, src=""):
+            cnt[0] += 1
+            print(f"  TEXT{src}@{pos}: {text[:200]}")
+
+        for e in msp:
+            t = e.dxftype()
+            if t == "MTEXT":
+                style = getattr(e.dxf, "style", "")
                 content = _dec(e.text, style).replace("\n", "\\n")
-                pos = e.dxf.insert
-                print(f"  MTEXT@{pos}: {content[:200]}")
-            else:
+                emit(content, e.dxf.insert)
+            elif t == "TEXT":
+                style = getattr(e.dxf, "style", "")
                 content = _dec(e.dxf.text, style)
-                pos = e.dxf.insert
-                print(f"  TEXT@{pos}: {content[:200]}")
-        if n == 0:
+                emit(content, e.dxf.insert)
+            elif t == "DIMENSION":
+                # 尺寸标注：优先覆盖文字，否则用测量值
+                try:
+                    txt = getattr(e.dxf, "text", "") or ""
+                    if not txt or txt == "<>":
+                        txt = f"{e.get_measurement():.2f}"
+                    content = _dec(txt, getattr(e.dxf, "style", ""))
+                    emit(content, e.dxf.insert, "(尺寸)")
+                except Exception:
+                    pass
+            elif t == "INSERT":
+                # 展开块引用，提取其中的文字与块属性（ATTRIB）
+                try:
+                    bname = e.dxf.name
+                    for ve in e.virtual_entities():
+                        vt = ve.dxftype()
+                        if vt == "MTEXT":
+                            content = _dec(ve.text, getattr(ve.dxf, "style", "")).replace("\n", "\\n")
+                            emit(content, ve.dxf.insert, f"(块:{bname})")
+                        elif vt in ("TEXT", "ATTRIB"):
+                            content = _dec(ve.dxf.text, getattr(ve.dxf, "style", ""))
+                            emit(content, ve.dxf.insert, f"(块:{bname})")
+                except Exception:
+                    pass
+        if cnt[0] == 0:
             print("  (无文字实体)")
 
     if args.entities:

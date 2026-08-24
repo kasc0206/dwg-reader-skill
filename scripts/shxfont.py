@@ -47,8 +47,7 @@ class ShxBigFont:
         self.shapes: dict[int, bytes] = {}
         if self.is_bigfont:
             self._parse_bigfont()
-        elif self.is_unifont:
-            self._parse_unifont()
+        # unifont 的 get_char 直接按 chr(code) 解码，无需解析字形数据
 
     def _detect_encoding_from_index(self) -> str | None:
         """从 fonts/index.json 读取编码。"""
@@ -87,32 +86,6 @@ class ShxBigFont:
             if offset + length <= len(data):
                 self.shapes[code] = data[offset:offset + length]
 
-    def _parse_unifont(self):
-        """unifont: shape number 即 Unicode 码点，无需字形数据。"""
-        data = self.data
-        sub = data.find(b"\x1a")
-        if sub == -1:
-            return
-        pos = sub + 1
-        # unifont 结构: count(u32), length(u16), 字体名, 参数...
-        count, = struct.unpack_from("<I", data, pos)
-        # 跳到索引表：count 个 (code u16, length u16)
-        # 简化：直接解析全部 code
-        pos += 4 + 2
-        # 跳过字体名字符串
-        while pos < len(data) and data[pos] != 0:
-            pos += 1
-        pos += 1
-        pos += 6  # above/below/modes/encoding/embed/ignore
-        for _ in range(count - 1):
-            if pos + 4 > len(data):
-                break
-            code, length = struct.unpack_from("<HH", data, pos)
-            pos += 4
-            if pos + length <= len(data):
-                self.shapes[code] = data[pos:pos + length]
-                pos += length
-
     def contains(self, code: int) -> bool:
         return code in self.shapes
 
@@ -149,10 +122,54 @@ class ShxBigFont:
 
 # 字体查找路径与缓存
 DEFAULT_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts")
-FONT_CACHE: dict[str, ShxBigFont] = {}
+FONT_CACHE: dict[str, "object"] = {}
 
 
-def get_font(name: str | None = None) -> ShxBigFont | None:
+def encoding_from_name(name: str | None) -> str | None:
+    """从字体名启发式推断编码体系（无需字体文件即可解码字节）。
+
+    覆盖：繁中 big5 / 韩文 cp949 / 日文 shift_jis；其余返回 None（保持默认 gbk）。
+    """
+    n = (name or "").lower()
+    if any(k in n for k in ("big5", "b5", "tc", "tch", "trad", "tw", "hk", "cht")):
+        return "big5"
+    if "kor" in n or "kr" in n:
+        return "cp949"
+    if any(k in n for k in ("jp", "japan", "jis")):
+        return "shift_jis"
+    return None
+
+
+class EncodingOnlyFont:
+    """无字形文件的轻量解码器：仅按指定编码把 shape number(两字节)解码为字符。
+
+    用于字体文件缺失但字体名已暗示编码（如繁中 big5 字体）的兜底，
+    使 \\M+ 大字体编码仍能正确解码。
+    """
+
+    def __init__(self, encoding: str):
+        self.encoding = encoding
+        self.name = encoding
+        self.is_bigfont = False
+        self.is_unifont = False
+
+    def get_char(self, code: int) -> str | None:
+        if code == 0:
+            return None
+        if 0x20 <= code < 0x7F:
+            return chr(code)
+        b = bytes([(code >> 8) & 0xFF, code & 0xFF])
+        codec = ENCODING_CODEC.get(self.encoding, self.encoding)
+        try:
+            return b.decode(codec, errors="strict")
+        except Exception:
+            return None
+
+    def __len__(self):
+        return 0
+
+
+def get_font(name: str | None = None):
     """按字体名加载大字体，带缓存，自动匹配编码。
 
     支持：
@@ -163,7 +180,7 @@ def get_font(name: str | None = None) -> ShxBigFont | None:
     if name is None:
         return None
 
-    # 直接路径
+    # 直接路径（绝对/相对）
     if os.path.isfile(name):
         key = os.path.basename(name).lower()
         if key in FONT_CACHE:
@@ -175,13 +192,16 @@ def get_font(name: str | None = None) -> ShxBigFont | None:
         except Exception:
             return None
 
-    key = name.lower()
+    # STYLE 表里的字体名可能带路径前缀（如 fonts/tssdchn.shx、C:\...\x.shx），
+    # 统一取 basename 后再做匹配，避免拼接 DEFAULT_FONT_DIR 时路径污染
+    base = os.path.basename(name)
+    key = base.lower()
     if key in FONT_CACHE:
         return FONT_CACHE[key]
 
-    candidates = [name, key]
+    candidates = [base, key]
     if not key.endswith(".shx"):
-        candidates += [name + ".shx", key + ".shx"]
+        candidates += [base + ".shx", key + ".shx"]
     for fn in candidates:
         p = os.path.join(DEFAULT_FONT_DIR, fn)
         if os.path.isfile(p):
@@ -191,6 +211,12 @@ def get_font(name: str | None = None) -> ShxBigFont | None:
                 return font
             except Exception:
                 continue
+    # 文件缺失：按字体名推断编码，返回轻量解码器（无需字形文件也能解码字节）
+    enc = encoding_from_name(name)
+    if enc:
+        dec = EncodingOnlyFont(enc)
+        FONT_CACHE[key] = dec
+        return dec
     return None
 
 
