@@ -6,19 +6,33 @@
   2. 解析 DXF 输出结构化报告（实体 / 图层 / 块 / 尺寸 / 范围）
   3. 提取全部文字标注（TEXT + MTEXT + 块内文字 + ATTRIB + DIMENSION）
      支持 BigFont/Unicode/%% 解码、阅读顺序还原、表格/图层聚合
+  4. 可选：尺寸标注精读、构件识别
 
 用法：
+  # 单文件
   python3 dwg_read.py <图纸.dwg|图纸.dxf> [--out 报告.md]
                       [--table] [--by-layer] [--no-convert] [--font 字体.shx]
+                      [--dimensions] [--components] [--layer-filter 关键词]
 
-  --table     以 Markdown 表格还原对齐网格（如门窗表）
-  --by-layer  按图层聚合输出文字
-  --no-convert 跳过 DWG→DXF 转换（输入已是 DXF 时加速）
-  --font      显式指定大字体文件（默认按 STYLE 表自动匹配 fonts/）
+  # 批量目录
+  python3 dwg_read.py --batch <目录> [--out-dir 输出目录]
+                      [--table] [--by-layer] [--dimensions] [--components]
 
-输出默认打印到 stdout；指定 --out 则写入文件并打印摘要到 stderr。
+  --table         以 Markdown 表格还原对齐网格（如门窗表）
+  --by-layer      按图层聚合输出文字
+  --no-convert    跳过 DWG→DXF 转换（输入已是 DXF 时加速）
+  --font          显式指定大字体文件（默认按 STYLE 表自动匹配 fonts/）
+  --dimensions    追加尺寸标注精读章节
+  --components    追加构件识别章节
+  --layer-filter  按图层名关键词过滤（仅匹配图层的相关内容）
+  --batch         批量模式：扫描目录下所有 .dwg/.dxf
+  --out-dir       批量模式的输出目录（每张图一个 .md + 总览 index.md）
+
+单文件输出默认打印到 stdout；指定 --out 则写入文件。
+批量模式必写入 --out-dir，并打印总览到 stdout。
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -27,6 +41,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ODA = "/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter"
 PARSE = os.path.join(HERE, "parse_dxf.py")
 STREAM = os.path.join(HERE, "extract_texts_stream.py")
+DIMS = os.path.join(HERE, "extract_dimensions.py")
+COMPS = os.path.join(HERE, "identify_components.py")
 
 
 def _run(script, dxf, *extra):
@@ -76,27 +92,30 @@ def resolve_dxf(src, no_convert):
     return None
 
 
-def main():
-    ap = argparse.ArgumentParser(description="DWG/DXF 图纸阅读一站式流水线")
-    ap.add_argument("file", help="DWG 或 DXF 文件路径")
-    ap.add_argument("--out", help="报告输出文件（默认打印到 stdout）")
-    ap.add_argument("--table", action="store_true", help="Markdown 表格还原")
-    ap.add_argument("--by-layer", action="store_true", help="按图层聚合文字")
-    ap.add_argument("--no-convert", action="store_true", help="跳过 DWG→DXF 转换")
-    ap.add_argument("--font", help="显式指定大字体文件")
-    args = ap.parse_args()
-
-    dxf = resolve_dxf(args.file, args.no_convert)
-    if not dxf:
-        sys.exit(1)
-
+def build_report(src, dxf, args):
+    """构建单张图的 Markdown 报告。"""
+    # 展开图层别名：--layer-filter 中的用户词经 --layer-alias 映射为实际图层片段，
+    # 让 parse_dxf 与 stream 两个脚本用同一套已展开的过滤表达式
+    if args.layer_filter and args.layer_alias:
+        try:
+            with open(args.layer_alias, "r", encoding="utf-8") as f:
+                alias = json.load(f)
+            pats = [p.strip() for p in args.layer_filter.split(",") if p.strip()]
+            for k in pats:
+                if k in alias:
+                    pats.append(str(alias[k]))
+            args = argparse.Namespace(**{**vars(args), "layer_filter": ",".join(pats)})
+        except Exception as e:
+            sys.stderr.write(f"[warn] 图层别名表读取失败: {e}\n")
     parts = []
     parts.append("# 图纸解析报告\n")
-    parts.append(f"> 源文件: `{os.path.basename(args.file)}`  | 解析文件: `{dxf}`\n")
+    parts.append(f"> 源文件: `{os.path.basename(src)}`  | 解析文件: `{dxf}`\n")
 
-    # 1. 结构化报告（parse_dxf.py --entities --texts --layers --blocks --limits）
-    report = _run(PARSE, dxf, "--entities", "--texts", "--layers",
-                  "--blocks", "--limits")
+    # 1. 结构化报告
+    parse_extra = ["--entities", "--texts", "--layers", "--blocks", "--limits"]
+    if args.layer_filter:
+        parse_extra += ["--layer-filter", args.layer_filter]
+    report = _run(PARSE, dxf, *parse_extra)
     if report.strip():
         parts.append("## 结构化解析\n")
         parts.append(report.rstrip("\n"))
@@ -105,7 +124,7 @@ def main():
         parts.append("> ⚠️ ezdxf 严格解析失败（文件可能损坏 / 缺 EOF）。"
                      "已跳过结构化报告，下方文字提取基于流式解析，结果仍可用。")
 
-    # 2. 文字提取（extract_texts_stream.py）
+    # 2. 文字提取
     extra = []
     if args.table:
         extra.append("--table")
@@ -113,6 +132,8 @@ def main():
         extra.append("--by-layer")
     if args.font:
         extra += ["--font", args.font]
+    if args.layer_filter:
+        extra += ["--layer-filter", args.layer_filter]
     texts = _run(STREAM, dxf, *extra)
     if texts.strip():
         title = "## 文字标注提取"
@@ -123,7 +144,129 @@ def main():
         parts.append("\n" + title + "\n")
         parts.append(texts.rstrip("\n"))
 
-    blob = "\n".join(parts).rstrip("\n") + "\n"
+    # 3. 尺寸标注精读
+    if args.dimensions:
+        dim_out = _run(DIMS, dxf)
+        if dim_out.strip():
+            parts.append("\n## 尺寸标注精读\n")
+            parts.append(dim_out.rstrip("\n"))
+
+    # 4. 构件识别
+    if args.components:
+        comp_out = _run(COMPS, dxf)
+        if comp_out.strip():
+            parts.append("\n## 构件识别\n")
+            parts.append(comp_out.rstrip("\n"))
+
+    return "\n".join(parts).rstrip("\n") + "\n"
+
+
+def _count_summary(md):
+    """从报告文本粗略统计实体数/文字条数。"""
+    ents = md.count("| LINE[") + md.count("| CIRCLE[") + md.count("| ARC[")
+    + md.count("| TEXT[") + md.count("| MTEXT[") + md.count("| INSERT[")
+    + md.count("| DIMENSION[") + md.count("| LWPOLYLINE[")
+    texts = md.count("TEXT@") + md.count("MTEXT@") + md.count("(尺寸)")
+    # 流式输出按行计
+    if texts == 0 and "## 文字标注提取" in md:
+        # 取该小节后的行数
+        idx = md.find("## 文字标注提取")
+        tail = md[idx:]
+        texts = tail.count("\n") - 1
+    return ents, max(texts, 0)
+
+
+def run_batch(args):
+    """批量模式：扫描目录下所有 .dwg/.dxf，每张图一份报告 + 总览索引。"""
+    if not os.path.isdir(args.batch):
+        sys.stderr.write(f"[error] --batch 需要一个目录: {args.batch}\n")
+        sys.exit(1)
+    if not args.out_dir:
+        sys.stderr.write("[error] 批量模式必须指定 --out-dir\n")
+        sys.exit(1)
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    files = []
+    for name in sorted(os.listdir(args.batch)):
+        if name.startswith("."):
+            continue
+        ext = os.path.splitext(name)[1].lower()
+        if ext in (".dwg", ".dxf"):
+            files.append(os.path.join(args.batch, name))
+
+    if not files:
+        sys.stderr.write(f"[warn] 目录下未找到 .dwg/.dxf 文件: {args.batch}\n")
+        sys.exit(0)
+
+    sys.stderr.write(f"[info] 发现 {len(files)} 张图纸，开始批量处理...\n")
+    index_rows = []
+    for i, src in enumerate(files, 1):
+        name = os.path.basename(src)
+        stem = os.path.splitext(name)[0]
+        out_md = os.path.join(args.out_dir, f"{stem}.md")
+        sys.stderr.write(f"\n[{i}/{len(files)}] {name}\n")
+        dxf = resolve_dxf(src, args.no_convert)
+        if not dxf:
+            index_rows.append((name, "转换失败", 0, 0, "—"))
+            continue
+        try:
+            md = build_report(src, dxf, args)
+            with open(out_md, "w", encoding="utf-8") as f:
+                f.write(md)
+            ents, texts = _count_summary(md)
+            index_rows.append((name, "成功", ents, texts, os.path.basename(out_md)))
+        except Exception as e:
+            sys.stderr.write(f"[error] 处理失败: {e}\n")
+            index_rows.append((name, f"处理失败: {e}", 0, 0, "—"))
+
+    # 写总览索引
+    index_md = os.path.join(args.out_dir, "index.md")
+    lines = ["# 批量图纸解析总览", "",
+             f"**目录**: `{args.batch}`",
+             f"**图数**: {len(files)}",
+             f"**成功**: {sum(1 for r in index_rows if r[1] == '成功')}",
+             f"**失败**: {sum(1 for r in index_rows if r[1] != '成功')}",
+             "", "## 明细", "",
+             "| # | 文件 | 状态 | 实体数 | 文字条数 | 报告 |",
+             "|---|------|------|--------|----------|------|"]
+    for i, (name, status, ents, texts, rep) in enumerate(index_rows, 1):
+        link = f"[{rep}]({rep})" if rep != "—" else "—"
+        lines.append(f"| {i} | {name} | {status} | {ents} | {texts} | {link} |")
+    with open(index_md, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    sys.stderr.write(f"\n[info] 总览已写入: {index_md}\n")
+    # 同时打印总览到 stdout
+    print("\n".join(lines))
+
+
+def main():
+    ap = argparse.ArgumentParser(description="DWG/DXF 图纸阅读一站式流水线")
+    ap.add_argument("file", nargs="?", help="DWG 或 DXF 文件路径（与 --batch 二选一）")
+    ap.add_argument("--batch", help="批量模式：扫描目录下所有 .dwg/.dxf")
+    ap.add_argument("--out-dir", help="批量模式的输出目录")
+    ap.add_argument("--out", help="单文件报告输出文件（默认 stdout）")
+    ap.add_argument("--table", action="store_true", help="Markdown 表格还原")
+    ap.add_argument("--by-layer", action="store_true", help="按图层聚合文字")
+    ap.add_argument("--no-convert", action="store_true", help="跳过 DWG→DXF 转换")
+    ap.add_argument("--font", help="显式指定大字体文件")
+    ap.add_argument("--dimensions", action="store_true", help="追加尺寸标注精读章节")
+    ap.add_argument("--components", action="store_true", help="追加构件识别章节")
+    ap.add_argument("--layer-filter", help="按图层名关键词过滤（保留匹配图层的内容）")
+    ap.add_argument("--layer-alias", help="图层别名表 JSON（{用户词: 实际图层片段}）")
+    args = ap.parse_args()
+
+    if args.batch:
+        run_batch(args)
+        return
+
+    if not args.file:
+        ap.error("必须提供 file 或 --batch")
+
+    dxf = resolve_dxf(args.file, args.no_convert)
+    if not dxf:
+        sys.exit(1)
+
+    blob = build_report(args.file, dxf, args)
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

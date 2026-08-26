@@ -1,9 +1,97 @@
 ---
 name: dwg-drawing-reader
 description: "当用户提供 DWG/DXF 工程图纸文件（建筑、机械、电气、结构、给排水等），需要阅读、解析、分析图纸内容时触发此技能。DWG 是 Autodesk 专有二进制格式，本技能通过 ODA File Converter 将 DWG 转换为 DXF 文本格式，再用 ezdxf 解析图层、实体（LINE/CIRCLE/ARC/TEXT/MTEXT/DIMENSION 等）、文字标注和尺寸信息，供用户阅读理解图纸内容。典型触发场景：读取 DWG 图纸、提取图纸文字标注、分析图纸尺寸、查看图纸图层结构、DWG 转 DXF、图纸内容问答。关键词：DWG、DXF、图纸、CAD 图纸、autocad、工程图、看图、图纸标注、图层。"
+tags:
+  - dwg
+  - dxf
+  - cad
+  - 图纸
+  - engineering
+tools:
+  - Read
+  - Shell
+compatibility:
+  os:
+    - macOS
+    - Linux
+    - Windows
+  platforms:
+    - macos-arm64
+    - macos-x86_64
+    - linux-x86_64
+    - windows-x86_64
+  runtime: "Python 3.10+，需预先安装 ezdxf（pip3 install ezdxf）与 ODA File Converter（DWG→DXF）。SHX 大字体解析器为内置脚本，仅依赖 Python 标准库。"
+  network: "无需联网。ODA / ezdxf 均为本地运行。"
 ---
 
 # DWG 图纸阅读
+
+## When to Use
+
+使用本 skill 当且仅当用户意图满足以下之一：
+
+- 提供 `.dwg` / `.dxf` 文件路径，并要求"读取 / 看 / 理解 / 提取 / 分析"图纸内容。
+- 要求从 CAD 图纸提取文字标注、尺寸、图层、表格（门窗表 / 材料表）。
+- 要求把 DWG 转为可读文本 / DXF。
+- 要求批量处理多个 DWG/DXF、按图层筛选、识别构件（门/窗/梁/柱等）、精读尺寸标注。
+
+关键词：DWG、DXF、CAD 图纸、工程图、图纸标注、图层、看图、算量。
+
+## Do Not Use
+
+- **不要**用于"画一张图 / 生成 CAD / 修改图纸几何"——本 skill 是只读解析器，不写回 DXF/DWG。
+- **不要**用于渲染图片（PNG/SVG）——本 skill 只输出结构化文本，不生成图纸图像。
+- **不要**用于非 CAD 的 PDF/图片图纸——那是 OCR/光栅识别任务，不在本 skill 范围。
+
+## Prerequisites
+
+| 组件 | 版本 / 路径 | 状态 | 安装 |
+|------|-------------|------|------|
+| Python | 3.10+ | 已安装 | 系统自带 |
+| ezdxf | v1.4+ | 可能需安装 | `pip3 install ezdxf` |
+| ODA File Converter | `/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter`（macOS） | 需安装 | https://www.opendesign.com/guestfiles/oda_file_converter ；安装后 `xattr -dr com.apple.quarantine "/Applications/ODAFileConverter.app"` |
+| 中文字体库 | `fonts/`（322 个 SHX + `index.json`） | 已内置 | 无需操作 |
+| 大字体解析器 | `scripts/shxfont.py` | 已内置 | 仅依赖标准库 |
+
+> 唯一硬依赖是 ezdxf 与 ODA（处理 DWG 时）。其余均为内置脚本与字体。
+
+## Supported Formats
+
+| 格式 | 输入支持 | 备注 |
+|------|----------|------|
+| `.dxf` | ✅ 直接解析 | 文本格式，ezdxf 原生支持 |
+| `.dwg` | ✅ 经 ODA 转 DXF | 自动调用 ODA 转为同目录 DXF 后解析 |
+| `.shx` | ✅ 字体解析 | 作为字体库被引用，不直接作为图纸输入 |
+| `.dgn` / `.step` / 3D 实体 | ❌ | 本 skill 面向 2D 工程图，不做 3D CAD 转换（见下方 Platform Support 注） |
+
+## Platform Support
+
+| 能力 | macOS arm64 | macOS x86_64 | Linux x86_64 | Windows x86_64 |
+|------|-------------|--------------|--------------|----------------|
+| 解析 DXF | ✅ | ✅ | ✅ | ✅ |
+| DWG→DXF（ODA） | ✅ | ✅ | ✅（需安装 ODA Linux 版） | ✅（需安装 ODA Win 版） |
+| 字体解码（SHX） | ✅ | ✅ | ✅ | ✅ |
+
+> 注：本 skill 与 NVIDIA `usd-convert-cad`（用于 3D CAD→USD 仿真）定位不同——本 skill 专注 2D 工程图（DWG/DXF）的文本/几何解析，不处理 3D 实体建模或仿真就绪资产。二者互补而非替代。
+
+## Implementation Contract
+
+- **唯一入口**：`scripts/dwg_read.py <文件> [选项]`，返回码 `0` 表示成功，非 0 表示失败。
+- **输出契约**：默认打印 Markdown 报告到 stdout；`--out` 写入文件并打印进度到 stderr。
+- **降级行为**：若 ezdxf 严格解析失败（缺 EOF / 损坏），`dwg_read.py` 自动降级为流式提取，报告顶部出现 `⚠️` 提示，文字提取仍可用。
+- **DWG 副作用**：处理 `.dwg` 会在源文件同目录落一个同名 `.dxf`（预期行为，非报错）。
+- **底层脚本**：`parse_dxf.py` / `extract_texts_stream.py` / `extract_dimensions.py` / `identify_components.py` 均为返回码驱动的 CLI，可被外部调用。
+
+## Troubleshooting
+
+| 现象 | 原因 | 处理 |
+|------|------|------|
+| `未找到 ODA File Converter` | ODA 未安装或路径不符 | 安装 ODA（见 Prerequisites），或传 `.dxf` 并加 `--no-convert` |
+| `DXF 解析失败（missing EOF tag）` | 文件缺 EOF | 自动降级流式提取；结果见 `⚠️` 提示下文字章节 |
+| 中文全变 `?` / 乱码 | 字体未匹配 | 加 `--font fonts/gbcbig.shx` 强制指定；或检查 `fonts/index.json` |
+| 报告全空（实体数 0） | 内容在匿名块定义内 | 已自动补提取未引用块文字；若仍空，文件可能无文字实体 |
+| DWG 转换卡住 / 弹窗 | ODA 参数不完整 | 不应手动调 ODA；统一用 `dwg_read.py` 入口 |
+| `未安装 ezdxf` | 环境缺包 | `pip3 install ezdxf` |
 
 ## 概述
 
@@ -72,10 +160,12 @@ dwg2dxf("input.dwg", "output.dxf")
 ## 解析脚本
 
 项目内置脚本位于 `scripts/` 目录：
-- `dwg_read.py` — **一站式流水线**（推荐）：自动 DWG→DXF 转换 + 结构化报告 + 文字提取，输出 Markdown 报告
-- `parse_dxf.py` — 解析 DXF 并输出结构化报告（实体清单、文字、图层、块、尺寸）
-- `extract_texts_stream.py` — 流式提取全部文字（低内存），支持 BigFont 解码、块展开、表格/图层聚合
+- `dwg_read.py` — **一站式流水线**（推荐）：自动 DWG→DXF 转换 + 结构化报告 + 文字提取 + 可选尺寸精读 / 构件识别 / 批量处理，输出 Markdown 报告
+- `parse_dxf.py` — 解析 DXF 并输出结构化报告（实体清单、文字、图层、块、尺寸），支持 `--layer-filter`
+- `extract_texts_stream.py` — 流式提取全部文字（低内存），支持 BigFont 解码、块展开、表格/图层聚合、`--layer-filter` / `--layer-alias`
 - `extract_texts.py` — 基于 ezdxf 的全量文字提取（含块属性 virtual_entities 展开）
+- `extract_dimensions.py` — **尺寸标注精读**：按类型（线性/对齐/角度/半径/直径/坐标/弧长）分类，关联最近几何，输出表格 + 可选 JSON
+- `identify_components.py` — **构件识别**：按块名/图层规则匹配门/窗/梁/柱/钢筋/楼梯/设备/道路/渠道等，输出构件清单（规则见 `component_rules.json`）
 - `shxfont.py` — SHX 大字体解析器（建立 shape number → 字符映射）
 - `shx_decompile.py` — SHX 反编译为 SHP 文本（等价 DUMPSHX / shx2shp）
 
@@ -86,22 +176,41 @@ dwg2dxf("input.dwg", "output.dxf")
 ### 一站式流水线（推荐）
 
 ```bash
-# DWG 或 DXF 均可，DWG 会自动调用 ODA 转为同目录 DXF
+# 单文件（DWG 或 DXF 均可，DWG 自动转 DXF）
 python3 scripts/dwg_read.py <图纸.dwg|图纸.dxf> [--out 报告.md]
                       [--table] [--by-layer] [--no-convert] [--font 字体.shx]
+                      [--dimensions] [--components]
+                      [--layer-filter "WALL|BEAM"] [--layer-alias 别名.json]
+
+# 批量目录：遍历目录下所有 .dwg/.dxf，每张图一份报告 + 总览 index.md
+python3 scripts/dwg_read.py --batch <目录> --out-dir <输出目录>
+                      [--table] [--by-layer] [--dimensions] [--components]
 
 # 选项
-#   --out 报告.md   写入 Markdown 报告文件（默认打印到 stdout）
-#   --table         以 Markdown 表格还原对齐网格（如门窗表）
-#   --by-layer      按图层聚合输出文字
-#   --no-convert    跳过 DWG→DXF 转换（输入已是 DXF 时加速）
-#   --font          显式指定大字体文件（默认按 STYLE 表自动匹配 fonts/）
+#   --out 报告.md        写入 Markdown 报告文件（默认打印到 stdout）
+#   --table              以 Markdown 表格还原对齐网格（如门窗表）
+#   --by-layer           按图层聚合输出文字
+#   --no-convert         跳过 DWG→DXF 转换（输入已是 DXF 时加速）
+#   --font               显式指定大字体文件（默认按 STYLE 表自动匹配 fonts/）
+#   --dimensions         追加「尺寸标注精读」章节（按类型分类 + 关联几何）
+#   --components         追加「构件识别」章节（门/窗/梁/柱等清单）
+#   --layer-filter       按图层名关键词/正则过滤（仅保留匹配图层；逗号分隔多词）
+#   --layer-alias        图层别名表 JSON（{用户词: 实际图层片段}），中文词映射到实际图层
+#   --batch              批量模式：扫描目录下所有 .dwg/.dxf
+#   --out-dir            批量模式的输出目录（每张图一个 .md + 总览 index.md）
 ```
 
 ### 用法（单脚本）
 
 ```bash
-python3 <skill目录>/scripts/parse_dxf.py <文件.dxf> [--entities] [--texts] [--layers] [--blocks] [--limits]
+# 结构化报告
+python3 <skill目录>/scripts/parse_dxf.py <文件.dxf> [--entities] [--texts] [--layers] [--blocks] [--limits] [--layer-filter WALL]
+
+# 尺寸标注精读
+python3 <skill目录>/scripts/extract_dimensions.py <文件.dxf> [--json] [--out 尺寸.md]
+
+# 构件识别
+python3 <skill目录>/scripts/identify_components.py <文件.dxf> [--rules 自定义.json] [--json] [--out 构件.md]
 ```
 
 ### 快速阅读理解（推荐）
@@ -276,6 +385,60 @@ MTEXT 的堆叠分数/公差（`\S top^bottom`、`\S top/bottom`、`\S top#botto
   `dwg_read.py` 自动降级为流式提取（结果仍可用）
 - BLOCKS 段内游离实体、嵌套 SECTION 均按实体提取，不丢字
 - 文本编码：优先 UTF-8（现代 CAD 通用），失败回退 `$DWGCODEPAGE` 指示的编解码器
+
+### 尺寸标注精读（`--dimensions`）
+
+针对 DIMENSION 实体，按 AutoCAD 类型分类并关联被标注几何：
+
+- **类型分类**：线性（0）、对齐（1）、角度（2/6）、直径（3）、半径（4）、坐标（5）、弧长（8），来自 `dimtype` 低 4 位。
+- **标注值**：优先覆盖文字（code 1），否则用 `get_measurement()` 测量值；已自动解码 `%%` / `\U+` / BigFont。
+- **几何关联**：对每条尺寸取插入点，匹配最近的 k 个 LINE/ARC/CIRCLE/LWPOLYLINE，给出类型/图层/距离/描述，便于核对"尺寸标在谁身上"。
+- **输出**：Markdown 明细表（类型/标注值/图层/位置/关联几何）+ 可选 `--json` 机器可读格式。
+- **降级**：ezdxf 严格解析失败时，流式提取 DIMENSION 的 code 1/10/70 关键字段（类型/位置），关联几何不可用，报告顶部标 `⚠️`。
+
+```bash
+python3 scripts/extract_dimensions.py 图.dxf --json
+# 或经一站式入口
+python3 scripts/dwg_read.py 图.dxf --dimensions
+```
+
+### 构件识别（`--components`）
+
+按**块名正则 + 图层名正则**匹配常见构件，输出按类型聚合的清单：
+
+- **覆盖类型**：门、窗、梁、柱、钢筋、楼梯、电梯、墙、板、基础、管道、设备、家具、轴线/轴号、标高、索引/详图、标注、图签/图框、指北针、道路、渠道、排水沟、建筑物、等高线、桩号、断面（共 26 类，规则见 `scripts/component_rules.json`）。
+- **匹配来源**：模型空间 INSERT 块参照 + 非匿名 BLOCK 定义内实体（兼容主体内容放在块定义里的不规范图纸）。
+- **聚合输出**：每类构件的数量、涉及图层、示例块名、位置范围（X/Y 包围盒）；可选 `--json`。
+- **可扩展**：`--rules 自定义.json` 覆盖默认规则；新增构件类型只需加一条 `{name, block_re, layer_re}`。
+- **降级**：ezdxf 失败时用流式提取 INSERT 块名 + 图层名匹配。
+
+```bash
+python3 scripts/identify_components.py 图.dxf --rules scripts/component_rules.json
+# 或经一站式入口
+python3 scripts/dwg_read.py 图.dxf --components
+```
+
+### 图层规则智能过滤（`--layer-filter` / `--layer-alias`）
+
+仅保留匹配图层的实体与文字，便于聚焦单一专业：
+
+- `--layer-filter "WALL|BEAM|DIMS"`：逗号分隔，支持正则片段，不区分大小写。
+- `--layer-alias 别名.json`：`{"墙":"WALL","梁":"BEAM"}`，把中文词映射为实际图层片段后并入过滤。
+- 作用于全链路：`parse_dxf.py`（实体/文字）与 `extract_texts_stream.py`（文字，含块内文字继承块图层）同时过滤。
+- 块内文字继承其所属 BLOCK 定义的图层（实测部分图纸 BLOCK 不带图层，则降级为不过滤该块）。
+
+### 批量处理目录（`--batch`）
+
+一次处理一个目录下的所有 `.dwg` / `.dxf`：
+
+```bash
+python3 scripts/dwg_read.py --batch /path/to/drawings --out-dir /path/to/reports \
+        [--table] [--by-layer] [--dimensions] [--components]
+```
+
+- 每张图生成 `<图名>.md` 报告到 `--out-dir`；
+- 额外生成 `index.md` 总览（图数/成功失败数/每张图的实体数、文字条数、报告链接）；
+- 处理进度打印到 stderr，总览打印到 stdout。
 
 ## 解析输出内容
 

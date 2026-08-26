@@ -23,6 +23,7 @@ def main():
     parser.add_argument("--blocks", action="store_true", help="列出块定义")
     parser.add_argument("--limits", action="store_true", help="输出图纸范围")
     parser.add_argument("--explode-blocks", action="store_true", help="展开块引用实体")
+    parser.add_argument("--layer-filter", help="按图层名关键词过滤（仅输出匹配图层的内容）")
     args = parser.parse_args()
 
     try:
@@ -49,6 +50,20 @@ def main():
             _font, _font_cache = None, None
 
     import re as _re
+
+    # 图层过滤器（不区分大小写）
+    _layer_re = None
+    if args.layer_filter:
+        _layer_re = _re.compile(args.layer_filter, _re.IGNORECASE)
+    # 标注图层名中命中的辅助判断
+    def _layer_ok(layer):
+        if _layer_re is None:
+            return True
+        return bool(_layer_re.search(layer))
+
+    def _emit_if_layer(layer):
+        # 用于实体清单/文字是否输出
+        return _layer_ok(layer)
 
     def _dec(text, style=""):
         """解码文字：\\M+ 大字体 / \\U+ Unicode / %% 转义；并清理 MTEXT 格式码。"""
@@ -113,8 +128,17 @@ def main():
             cnt[0] += 1
             print(f"  TEXT{src}@{pos}: {text[:200]}")
 
+        # 图层过滤：仅保留匹配图层
+        def _text_ok(e):
+            try:
+                return _layer_ok(e.dxf.layer)
+            except Exception:
+                return True
+
         for e in msp:
             t = e.dxftype()
+            if not _text_ok(e):
+                continue
             if t == "MTEXT":
                 style = getattr(e.dxf, "style", "")
                 content = _dec(e.text, style).replace("\n", "\\n")
@@ -155,6 +179,8 @@ def main():
         for e in msp:
             t = e.dxftype()
             layer = e.dxf.layer
+            if not _layer_ok(layer):
+                continue
             if t == "LINE":
                 print(f"  LINE[{layer}] ({e.dxf.start[0]:.2f},{e.dxf.start[1]:.2f}) -> ({e.dxf.end[0]:.2f},{e.dxf.end[1]:.2f})")
             elif t == "CIRCLE":

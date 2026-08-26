@@ -18,6 +18,10 @@
 - **SHX 反编译**：大字体 SHX → SHP 文本（等价 DUMPSHX / shx2shp 工具）
 - **低内存提取**：大 DXF 逐行流式解析，避免 OOM
 - **损坏文件容错**：缺 EOF / 空值 / 嵌套 SECTION / 无 ENTITIES 段等不规范 DXF 均不丢字
+- **尺寸标注精读**：`--dimensions` 按类型（线性/对齐/角度/半径/直径/坐标/弧长）分类，关联最近几何，输出表格 + JSON
+- **构件识别**：`--components` 按块名/图层规则匹配门/窗/梁/柱/钢筋/楼梯/设备/道路/渠道等 26 类构件，规则可扩展
+- **图层智能过滤**：`--layer-filter "WALL|BEAM"` + `--layer-alias 别名.json`，仅保留匹配图层的内容
+- **批量处理**：`--batch <目录> --out-dir <目录>` 一次处理多张图纸，生成总览 index.md
 
 ## 环境依赖
 
@@ -37,6 +41,10 @@
 python3 scripts/dwg_read.py 图纸.dwg --out 报告.md
 python3 scripts/dwg_read.py 图纸.dxf --table          # 表格还原
 python3 scripts/dwg_read.py 图纸.dxf --by-layer       # 按图层聚合
+python3 scripts/dwg_read.py 图纸.dxf --dimensions     # 尺寸标注精读
+python3 scripts/dwg_read.py 图纸.dxf --components     # 构件识别
+python3 scripts/dwg_read.py 图纸.dxf --layer-filter "WALL|BEAM"  # 按图层过滤
+python3 scripts/dwg_read.py --batch ./drawings --out-dir ./reports  # 批量
 ```
 
 ### 1. 转换 DWG → DXF
@@ -100,14 +108,19 @@ DXF 文本中字符的三种存储方式：
 
 ```
 dwg-reader-skill/
-├── SKILL.md              # 技能说明
+├── SKILL.md              # 技能说明（NVIDIA 风格范式）
+├── AGENT.md             # 面向 AI Agent 的操作手册
+├── README.md            # 本文档
 ├── scripts/
-│   ├── parse_dxf.py           # 结构化解析（实体/文字/图层/尺寸）
-│   ├── extract_texts_stream.py # 流式文字提取（低内存，自动字体匹配）
-│   ├── extract_texts.py       # 文字提取（ezdxf）
-│   ├── extract_texts_lowmem.py # 文字提取（正则低内存版）
-│   ├── shxfont.py             # SHX 大字体解析器（多编码）
-│   └── shx_decompile.py       # SHX → SHP 反编译
+│   ├── dwg_read.py           # 一站式流水线（推荐入口）
+│   ├── parse_dxf.py          # 结构化解析（实体/文字/图层/尺寸/块，支持 --layer-filter）
+│   ├── extract_texts_stream.py # 流式文字提取（低内存，自动字体匹配，支持图层过滤）
+│   ├── extract_texts.py      # 文字提取（ezdxf，块属性展开）
+│   ├── extract_dimensions.py # 尺寸标注精读（按类型分类 + 关联几何，支持 --json）
+│   ├── identify_components.py # 构件识别（26 类规则，支持 --rules/--json）
+│   ├── component_rules.json  # 构件识别规则表（可扩展）
+│   ├── shxfont.py            # SHX 大字体解析器（多编码）
+│   └── shx_decompile.py      # SHX → SHP 反编译
 └── fonts/               # 322 个 SHX 字体 + index.json
 ```
 

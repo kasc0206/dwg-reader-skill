@@ -10,6 +10,7 @@ DXF 文本格式：每两行一个 tag，code 行/value 行。本脚本逐行扫
 - 块属性（ATTRIB）世界坐标提取
 - 尺寸标注（DIMENSION）文字提取（覆盖文字或测量值）
 """
+import json
 import math
 import os
 import re
@@ -241,6 +242,8 @@ def main():
     font_path = None
     table_mode = False
     by_layer = False
+    layer_filter = None
+    layer_alias = None
     i = 2
     while i < len(sys.argv):
         if sys.argv[i] == "--font" and i + 1 < len(sys.argv):
@@ -252,6 +255,12 @@ def main():
         elif sys.argv[i] == "--by-layer":
             by_layer = True
             i += 1
+        elif sys.argv[i] == "--layer-filter" and i + 1 < len(sys.argv):
+            layer_filter = sys.argv[i + 1]
+            i += 2
+        elif sys.argv[i] == "--layer-alias" and i + 1 < len(sys.argv):
+            layer_alias = sys.argv[i + 1]
+            i += 2
         else:
             out = sys.argv[i]
             i += 1
@@ -267,9 +276,27 @@ def main():
             n = sum(1 for v in font_cache.values() if v is not None)
             print(f"自动匹配 {n} 个大字体", file=sys.stderr)
 
+    # 图层过滤器：--layer-filter 接受逗号分隔的关键词/正则片段；
+    # --layer-alias 是 JSON {"用户词": "实际图层片段"}，命中用户词时把其值并入过滤。
+    layer_filter_re = None
+    if layer_filter:
+        patterns = [p.strip() for p in layer_filter.split(",") if p.strip()]
+        if layer_alias:
+            try:
+                with open(layer_alias, "r", encoding="utf-8") as f:
+                    alias = json.load(f)
+                for k in patterns:
+                    if k in alias:
+                        patterns.append(str(alias[k]))
+            except Exception as e:
+                sys.stderr.write(f"[warn] 别名表读取失败: {e}\n")
+        if patterns:
+            layer_filter_re = re.compile("|".join(patterns), re.IGNORECASE)
+            print(f"图层过滤器: {patterns}", file=sys.stderr)
+
     texts = []
     section = None  # 'BLOCKS' / 'ENTITIES' / None
-    blocks = {}  # name -> {'base':(bx,by), 'items':[{'type','x','y','style','seg':[]}]}
+    blocks = {}  # name -> {'base':(bx,by), 'layer':'', 'items':[{'type','x','y','style','seg':[],'layer':''}]}
     used_blocks = set()  # 被 INSERT 引用过的块名（已展开，无需再次直接提取）
 
     cur_entity = None
@@ -289,18 +316,26 @@ def main():
     cur_block = None  # {'name','base':(bx,by),'items':[]}
     cur_block_item = None  # 块内子实体临时收集
 
+    def _layer_ok(layer):
+        """图层过滤器：layer_filter_re 为空表示不过滤（全部保留）。"""
+        if layer_filter_re is None:
+            return True
+        if not layer:
+            return False
+        return bool(layer_filter_re.search(layer))
+
     def flush_entity():
         nonlocal cur_entity, cur_content, cur_x, cur_y, cur_layer, cur_type, cur_style
         nonlocal cur_point_done, cur_insert, cur_block_item, cur_dim_meas
         if cur_entity == "MTEXT":
             ef = font_for_style(cur_style, font, font_cache)
             content = clean_mtext_format(decode_bigfont("".join(cur_content), ef))
-            if content.strip() and content.strip() != "<>":
+            if content.strip() and content.strip() != "<>" and _layer_ok(cur_layer):
                 texts.append((cur_y, cur_x, cur_type, cur_layer, content))
         elif cur_entity in ("TEXT", "ATTRIB"):
             ef = font_for_style(cur_style, font, font_cache)
             content = decode_bigfont("".join(cur_content), ef)
-            if content.strip() and content.strip() != "<>":
+            if content.strip() and content.strip() != "<>" and _layer_ok(cur_layer):
                 texts.append((cur_y, cur_x, cur_type, cur_layer, content))
         elif cur_entity == "DIMENSION":
             # 尺寸文字：优先覆盖文字(code 1)，否则用测量值
@@ -312,7 +347,7 @@ def main():
                 else:
                     dim_text = ""  # 无覆盖文字且无测量值（如 <> 占位符）→ 跳过
             content = decode_bigfont(dim_text, ef) if dim_text else ""
-            if content.strip() and content.strip() != "<>":
+            if content.strip() and content.strip() != "<>" and _layer_ok(cur_layer):
                 texts.append((cur_y, cur_x, cur_type, cur_layer, content))
         elif cur_entity == "INSERT" and cur_insert is not None:
             name = cur_insert["name"]
@@ -335,8 +370,10 @@ def main():
                         c = clean_mtext_format(decode_bigfont(raw, ef))
                     else:
                         c = decode_bigfont(raw, ef)
-                    if c.strip():
-                        texts.append((wy, wx, it["type"], "", c))
+                    # 块内文字继承块的图层；按过滤器判断是否保留
+                    it_layer = it.get("layer", "") or block.get("layer", "")
+                    if c.strip() and _layer_ok(it_layer):
+                        texts.append((wy, wx, it["type"], it_layer, c))
         # 块定义内子实体先暂存到 cur_block_item（在 BLOCKS 段处理flush时收集）
         cur_entity = None
         cur_content = []
@@ -409,7 +446,7 @@ def main():
             elif cur_value == "ENDSEC":
                 section = None
             elif cur_value == "BLOCK" and section == "BLOCKS":
-                cur_block = {"name": "", "base": (0.0, 0.0), "items": []}
+                cur_block = {"name": "", "base": (0.0, 0.0), "layer": "", "items": []}
                 cur_block_item = None
             elif cur_value == "INSERT" and section == "ENTITIES":
                 cur_insert = {"name": "", "bx": 0.0, "by": 0.0,
@@ -426,7 +463,7 @@ def main():
                 # 以及 ENTITIES 段实体，均按普通实体提取（flush_entity 路径）
                 if section == "BLOCKS" and cur_block is not None:
                     cur_block_item = {"type": cur_value, "x": 0.0, "y": 0.0,
-                                      "style": "", "seg": []}
+                                      "style": "", "seg": [], "layer": cur_block.get("layer", "")}
         elif code == 2:
             if cur_entity == "SECTION":
                 # 标准 DXF：SECTION 由 0/SECTION + 2/<段名> 定义
@@ -440,6 +477,11 @@ def main():
         elif code == 8:
             if section == "BLOCKS" and cur_block_item is not None:
                 pass
+            elif section == "BLOCKS" and cur_entity == "BLOCK" and cur_block is not None:
+                # 记录块定义自身图层，其后块内文字继承该图层
+                cur_block["layer"] = cur_value
+                if cur_block_item is not None:
+                    cur_block_item["layer"] = cur_value
             else:
                 cur_layer = cur_value
         elif code == 7:
@@ -528,15 +570,19 @@ def main():
         if name in used_blocks:
             continue
         bbx, bby = blk["base"]
+        blk_layer = blk.get("layer", "")
         for it in blk["items"]:
             if it["type"] not in ("TEXT", "MTEXT"):
+                continue
+            it_layer = it.get("layer", "") or blk_layer
+            if not _layer_ok(it_layer):
                 continue
             ef = font_for_style(it["style"], font, font_cache)
             raw = "".join(it["seg"])
             c = (clean_mtext_format(decode_bigfont(raw, ef))
                  if it["type"] == "MTEXT" else decode_bigfont(raw, ef))
             if c.strip():
-                texts.append((it["y"], it["x"], it["type"], "", c))
+                texts.append((it["y"], it["x"], it["type"], it_layer, c))
 
     texts = reorder_by_columns(texts)
     print(f"共提取 {len(texts)} 条文字", file=sys.stderr)
