@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dwg-reader-skill"
+version = "0.2.0"
+description = "Extract structured content and multilingual SHX text from DWG/DXF drawings"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{name = "DWG Reader Skill contributors"}]
+dependencies = []
+
+[project.optional-dependencies]
+dxf = ["ezdxf>=1.4,<2"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+dwg-reader = "dwg_reader.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.data-files]
+"share/dwg-reader/fonts" = ["fonts/*.shx", "fonts/index.json", "fonts/README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["scripts"]
