@@ -22,6 +22,9 @@
 - **构件识别**：`--components` 按块名/图层规则匹配门/窗/梁/柱/钢筋/楼梯/设备/道路/渠道等 26 类构件，规则可扩展
 - **图层智能过滤**：`--layer-filter "WALL|BEAM"` + `--layer-alias 别名.json`，仅保留匹配图层的内容
 - **批量处理**：`--batch <目录> --out-dir <目录>` 一次处理多张图纸，生成总览 index.md
+- **可选 CAD 后端**：`dwg-reader doctor` 探测 ODA、LibreDWG、OpenSCAD、OpenCAD
+- **OpenSCAD 桥接**：二维 DXF 按高度/图层拉伸并导出 STL、3MF、OFF
+- **MCP 服务**：通过 stdio MCP 暴露诊断、文字提取、结构检查和显式网格导出
 
 ## 环境依赖
 
@@ -31,6 +34,7 @@
 | Python 3.13+ | 运行脚本 |
 | ezdxf | `pip3 install ezdxf` |
 | SHX 解析器 | 内置 `scripts/shxfont.py`（自研，仅依赖标准库，无需第三方包） |
+| OpenSCAD / OpenCAD | 可选本地后端，使用 `dwg-reader doctor` 探测 |
 
 ## 快速开始
 
@@ -45,6 +49,11 @@ python3 scripts/dwg_read.py 图纸.dxf --dimensions     # 尺寸标注精读
 python3 scripts/dwg_read.py 图纸.dxf --components     # 构件识别
 python3 scripts/dwg_read.py 图纸.dxf --layer-filter "WALL|BEAM"  # 按图层过滤
 python3 scripts/dwg_read.py --batch ./drawings --out-dir ./reports  # 批量
+
+# 工程化 CLI / 可选后端 / MCP
+dwg-reader doctor --format json
+dwg-reader openscad profile.dxf model.stl --height 12 --layer CUT
+dwg-reader-mcp  # 先安装 .[dxf,mcp]
 ```
 
 ### 1. 转换 DWG → DXF

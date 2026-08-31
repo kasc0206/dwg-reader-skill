@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import __version__
+from .backends import convert_dwg_file, doctor_report, openscad_extrude
 from .fonts import get_font
 from .report import inspect_report, text_dict
 from .stream import extract_texts
@@ -17,7 +19,7 @@ DEFAULT_ODA = Path("/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileCon
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dwg-reader", description="Read DWG/DXF drawings")
-    parser.add_argument("--version", action="version", version="%(prog)s 0.2.0")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command", required=True)
 
     text = commands.add_parser("text", help="stream text from a DXF file")
@@ -49,10 +51,22 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--recursive", action="store_true")
     convert.add_argument("--audit", action="store_true")
     convert.add_argument("--oda", type=Path, default=DEFAULT_ODA)
+    convert.add_argument("--backend", choices=("auto", "oda", "libredwg"), default="auto")
 
     font = commands.add_parser("font", help="inspect a bundled or explicit SHX font")
     font.add_argument("name")
     font.add_argument("codes", nargs="*")
+
+    doctor = commands.add_parser("doctor", help="detect optional CAD backends")
+    doctor.add_argument("--format", choices=("text", "json"), default="text")
+
+    scad = commands.add_parser("openscad", help="extrude a 2D DXF with OpenSCAD")
+    scad.add_argument("input", type=Path)
+    scad.add_argument("output", type=Path)
+    scad.add_argument("--height", type=float, default=10.0)
+    scad.add_argument("--layer")
+    scad.add_argument("--convexity", type=int, default=10)
+    scad.add_argument("--timeout", type=int, default=300)
     return parser
 
 
@@ -65,8 +79,12 @@ def main(argv: list[str] | None = None) -> int:
             return _convert(args)
         if args.command == "font":
             return _font(args)
+        if args.command == "doctor":
+            return _doctor(args)
+        if args.command == "openscad":
+            return _openscad(args)
         return _inspect(args)
-    except (OSError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -100,6 +118,12 @@ def _text(args: argparse.Namespace) -> int:
 
 
 def _convert(args: argparse.Namespace) -> int:
+    if args.input.is_file():
+        result = convert_dwg_file(
+            args.input, args.output, backend=args.backend, oda_path=args.oda,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     if not args.oda.is_file():
         raise ValueError(f"ODA File Converter not found: {args.oda}")
     source = args.input.resolve()
@@ -126,6 +150,30 @@ def _font(args: argparse.Namespace) -> int:
     for token in args.codes:
         code = int(token, 16)
         print(f"0x{code:04X}\t{font.get_char(code) or ''}")
+    return 0
+
+
+def _doctor(args: argparse.Namespace) -> int:
+    report = doctor_report()
+    if args.format == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+    for name, status in report["backends"].items():
+        state = "ok" if status["available"] else "missing"
+        detail = status["path"] or status["purpose"]
+        print(f"{name}\t{state}\t{detail}")
+    for name in ("python", "ezdxf", "mcp"):
+        status = report[name]
+        print(f"{name}\t{'ok' if status['available'] else 'missing'}\t{status.get('version') or ''}")
+    return 0
+
+
+def _openscad(args: argparse.Namespace) -> int:
+    result = openscad_extrude(
+        args.input, args.output, height=args.height, layer=args.layer,
+        convexity=args.convexity, timeout=args.timeout,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 

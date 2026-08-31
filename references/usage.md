@@ -3,11 +3,14 @@
 ## 命令
 
 ```bash
-dwg-reader convert input.dwg output-dir [--version ACAD2018] [--recursive] [--audit]
+dwg-reader convert input.dwg output-dir [--backend auto|oda|libredwg]
 dwg-reader text input.dxf [-o output.txt] [--font gbcbig] [--format text|json]
                 [--with-metadata] [--expand-blocks] [--max-depth 8]
 dwg-reader inspect input.dxf [--format text|json] [--expand-blocks] [-o report.json]
 dwg-reader font gbcbig BAA3 C4CF
+dwg-reader doctor [--format text|json]
+dwg-reader openscad input.dxf output.stl [--height 10] [--layer CUT]
+dwg-reader-mcp
 ```
 
 历史兼容入口仍位于 `scripts/`，新流程优先使用统一 CLI。
@@ -32,3 +35,7 @@ dwg-reader font gbcbig BAA3 C4CF
 - DXF 很大时使用 `text`；不要使用旧的 `extract_texts_lowmem.py`，它会将整个文件
   载入内存。
 - 输出乱码时，先检查实体样式与 STYLE 表 code 4 指定的 bigfont，再尝试显式字体。
+- `openscad` 是显式写操作，只写指定输出文件。设置 `OPENSCAD_PATH` 可覆盖自动探测。
+- `DWG_READER_ODA_PATH`、`DWG_READER_LIBREDWG_PATH`、`OPENCAD_PATH` 可覆盖后端路径。
+
+集成来源、能力边界与许可证选择见 [integrations.md](integrations.md)。

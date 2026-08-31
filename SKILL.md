@@ -1,27 +1,6 @@
 ---
 name: dwg-drawing-reader
-description: "当用户提供 DWG/DXF 工程图纸文件（建筑、机械、电气、结构、给排水等），需要阅读、解析、分析图纸内容时触发此技能。DWG 是 Autodesk 专有二进制格式，本技能通过 ODA File Converter 将 DWG 转换为 DXF 文本格式，再用 ezdxf 解析图层、实体（LINE/CIRCLE/ARC/TEXT/MTEXT/DIMENSION 等）、文字标注和尺寸信息，供用户阅读理解图纸内容。典型触发场景：读取 DWG 图纸、提取图纸文字标注、分析图纸尺寸、查看图纸图层结构、DWG 转 DXF、图纸内容问答。关键词：DWG、DXF、图纸、CAD 图纸、autocad、工程图、看图、图纸标注、图层。"
-tags:
-  - dwg
-  - dxf
-  - cad
-  - 图纸
-  - engineering
-tools:
-  - Read
-  - Shell
-compatibility:
-  os:
-    - macOS
-    - Linux
-    - Windows
-  platforms:
-    - macos-arm64
-    - macos-x86_64
-    - linux-x86_64
-    - windows-x86_64
-  runtime: "Python 3.10+，需预先安装 ezdxf（pip3 install ezdxf）与 ODA File Converter（DWG→DXF）。SHX 大字体解析器为内置脚本，仅依赖 Python 标准库。"
-  network: "无需联网。ODA / ezdxf 均为本地运行。"
+description: "读取、解析和分析 DWG/DXF 工程图纸，提取图层、实体、文字、尺寸、表格和构件，并可按需通过 OpenSCAD 导出闭合二维轮廓或通过 MCP 提供结构化只读工具。适用于建筑、机械、电气、结构及给排水 CAD 内容理解；不用于直接编辑 DWG/DXF。"
 ---
 
 # DWG 图纸阅读
@@ -40,7 +19,8 @@ compatibility:
 ## Do Not Use
 
 - **不要**用于"画一张图 / 生成 CAD / 修改图纸几何"——本 skill 是只读解析器，不写回 DXF/DWG。
-- **不要**用于渲染图片（PNG/SVG）——本 skill 只输出结构化文本，不生成图纸图像。
+- **不要**把 OpenSCAD 拉伸当成完整 DWG 渲染；仅在用户明确要求从闭合二维 DXF
+  生成 3D 网格时使用可选后端。
 - **不要**用于非 CAD 的 PDF/图片图纸——那是 OCR/光栅识别任务，不在本 skill 范围。
 
 ## Prerequisites
@@ -81,6 +61,8 @@ compatibility:
 - **降级行为**：若 ezdxf 严格解析失败（缺 EOF / 损坏），`dwg_read.py` 自动降级为流式提取，报告顶部出现 `⚠️` 提示，文字提取仍可用。
 - **DWG 副作用**：处理 `.dwg` 会在源文件同目录落一个同名 `.dxf`（预期行为，非报错）。
 - **底层脚本**：`parse_dxf.py` / `extract_texts_stream.py` / `extract_dimensions.py` / `identify_components.py` 均为返回码驱动的 CLI，可被外部调用。
+- **可选集成**：需要 OpenSCAD、OpenCAD 或 MCP 时先读取
+  [references/integrations.md](references/integrations.md)，再运行 `dwg-reader doctor`。
 
 ## Troubleshooting
 
