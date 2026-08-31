@@ -34,6 +34,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -163,9 +164,18 @@ def build_report(src, dxf, args):
 
 def _count_summary(md):
     """从报告文本粗略统计实体数/文字条数。"""
-    ents = md.count("| LINE[") + md.count("| CIRCLE[") + md.count("| ARC[")
-    + md.count("| TEXT[") + md.count("| MTEXT[") + md.count("| INSERT[")
-    + md.count("| DIMENSION[") + md.count("| LWPOLYLINE[")
+    # 优先取结构化报告中权威的实体总数
+    m = re.search(r"模型空间实体数:\s*(\d+)", md)
+    if m:
+        ents = int(m.group(1))
+    else:
+        # 流式降级输出：按实体清单的“  类型[图层]”行计数（前缀为两个空格）
+        ents = (
+            md.count("  LINE[") + md.count("  CIRCLE[") + md.count("  ARC[")
+            + md.count("  TEXT[") + md.count("  MTEXT[") + md.count("  INSERT[")
+            + md.count("  DIMENSION[") + md.count("  LWPOLYLINE[")
+            + md.count("  BLOCK[") + md.count("  POINT[") + md.count("  ELLIPSE[")
+        )
     texts = md.count("TEXT@") + md.count("MTEXT@") + md.count("(尺寸)")
     # 流式输出按行计
     if texts == 0 and "## 文字标注提取" in md:
