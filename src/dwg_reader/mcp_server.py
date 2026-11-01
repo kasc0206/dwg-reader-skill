@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from .backends import doctor_report, openscad_extrude
+from .pipeline import ReadOptions
+from .pipeline import read_drawing as read_drawing_report
+from .quantity import build_quantity, quantity_markdown
 from .report import inspect_report
 from .stream import extract_texts
 
@@ -42,8 +45,37 @@ def create_server():
         return inspect_report(path, expand_blocks=expand_blocks, max_depth=max_depth)
 
     @server.tool()
+    def read_drawing(
+        path: str,
+        table: bool = False,
+        by_layer: bool = False,
+        dimensions: bool = False,
+        components: bool = False,
+        layer_filter: str | None = None,
+    ) -> dict:
+        """Read a DWG/DXF drawing: decoded texts, structure, dimensions, components."""
+        options = ReadOptions(
+            table=table,
+            by_layer=by_layer,
+            dimensions=dimensions,
+            components=components,
+            layer_filter=layer_filter,
+        )
+        result = read_drawing_report(path, options)
+        return {"markdown": result.markdown, **result.payload}
+
+    @server.tool()
+    def drawing_quantities(path: str, layer_filter: str | None = None) -> dict:
+        """Return component counts and per-layer geometry totals (drawing units)."""
+        report = build_quantity(path, options=ReadOptions(layer_filter=layer_filter))
+        return {"markdown": quantity_markdown(report), **report.sheets()}
+
+    @server.tool()
     def extrude_dxf_with_openscad(
-        path: str, output: str, height: float = 10.0, layer: str | None = None,
+        path: str,
+        output: str,
+        height: float = 10.0,
+        layer: str | None = None,
     ) -> dict:
         """Explicitly export a 2D DXF as STL/3MF/OFF using local OpenSCAD."""
         return openscad_extrude(path, output, height=height, layer=layer)
@@ -57,4 +89,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

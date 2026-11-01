@@ -22,5 +22,5 @@ def test_openscad_rejects_missing_input(tmp_path: Path):
 
 
 def test_converter_rejects_missing_input(tmp_path: Path):
-    with pytest.raises(ValueError, match="DWG input not found"):
+    with pytest.raises(ValueError, match="DWG/T3 input not found"):
         convert_dwg_file(tmp_path / "missing.dwg", tmp_path / "out")

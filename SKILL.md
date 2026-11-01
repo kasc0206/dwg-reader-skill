@@ -1,6 +1,6 @@
 ---
 name: dwg-drawing-reader
-description: "读取、解析和分析 DWG/DXF 工程图纸，提取图层、实体、文字、尺寸、表格和构件，并可按需通过 OpenSCAD 导出闭合二维轮廓或通过 MCP 提供结构化只读工具。适用于建筑、机械、电气、结构及给排水 CAD 内容理解；不用于直接编辑 DWG/DXF。"
+description: "读取、解析和分析 DWG/DXF 工程图纸，提取图层、实体、文字、尺寸、表格和构件，并可导出算量清单（CSV/XLSX）、按需通过 OpenSCAD 导出闭合二维轮廓或通过 MCP 提供结构化只读工具。适用于建筑、机械、电气、结构及给排水 CAD 内容理解；不用于直接编辑 DWG/DXF。"
 ---
 
 # DWG 图纸阅读
@@ -25,65 +25,70 @@ description: "读取、解析和分析 DWG/DXF 工程图纸，提取图层、实
 
 ## Prerequisites
 
-| 组件 | 版本 / 路径 | 状态 | 安装 |
-|------|-------------|------|------|
-| Python | 3.10+ | 已安装 | 系统自带 |
-| ezdxf | v1.4+ | 可能需安装 | `pip3 install ezdxf` |
-| ODA File Converter | `/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter`（macOS） | 需安装 | https://www.opendesign.com/guestfiles/oda_file_converter ；安装后 `xattr -dr com.apple.quarantine "/Applications/ODAFileConverter.app"` |
-| 中文字体库 | `fonts/`（322 个 SHX + `index.json`） | 已内置 | 无需操作 |
-| 大字体解析器 | `scripts/shxfont.py` | 已内置 | 仅依赖标准库 |
+| 组件               | 版本 / 路径                                                                                                                                                                                | 状态          | 安装                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- | ----------------------------------------------------------------------------------------------- |
+| Python             | 3.10+                                                                                                                                                                                      | 已安装        | 系统自带                                                                                        |
+| ezdxf              | v1.4+                                                                                                                                                                                      | 可选          | `pip install 'dwg-reader-skill[dxf]'`（仅 `inspect` 需要）                                      |
+| openpyxl           | 3.1+                                                                                                                                                                                       | 可选          | `pip install 'dwg-reader-skill[xlsx]'`（仅 XLSX 算量导出）                                      |
+| ODA File Converter | Windows `C:\Program Files\ODA\ODAFileConverter <版本>\ODAFileConverter.exe`；macOS `/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter`；Linux `/usr/bin/ODAFileConverter` | 仅 DWG 需安装 | https://www.opendesign.com/guestfiles/oda_file_converter ；也支持环境变量 `DWG_READER_ODA_PATH` |
+| 中文字体库         | `fonts/`（322 个 SHX + `index.json`）                                                                                                                                                      | 已内置        | 无需操作                                                                                        |
+| 大字体解析器       | `src/dwg_reader/fonts.py`、`scripts/shxfont.py`                                                                                                                                            | 已内置        | 仅依赖标准库                                                                                    |
 
-> 唯一硬依赖是 ezdxf 与 ODA（处理 DWG 时）。其余均为内置脚本与字体。
+> `read` / `quantity` 仅依赖标准库；ezdxf 与 ODA（处理 DWG 时）为可选增强。
 
 ## Supported Formats
 
-| 格式 | 输入支持 | 备注 |
-|------|----------|------|
-| `.dxf` | ✅ 直接解析 | 文本格式，ezdxf 原生支持 |
-| `.dwg` | ✅ 经 ODA 转 DXF | 自动调用 ODA 转为同目录 DXF 后解析 |
-| `.shx` | ✅ 字体解析 | 作为字体库被引用，不直接作为图纸输入 |
-| `.dgn` / `.step` / 3D 实体 | ❌ | 本 skill 面向 2D 工程图，不做 3D CAD 转换（见下方 Platform Support 注） |
+| 格式                       | 输入支持         | 备注                                                                    |
+| -------------------------- | ---------------- | ----------------------------------------------------------------------- |
+| `.dxf`                     | ✅ 直接解析      | 文本格式，ezdxf 原生支持                                                |
+| `.dwg`                     | ✅ 经 ODA 转 DXF | 自动调用 ODA 转为同目录 DXF 后解析                                      |
+| `.shx`                     | ✅ 字体解析      | 作为字体库被引用，不直接作为图纸输入                                    |
+| `.dgn` / `.step` / 3D 实体 | ❌               | 本 skill 面向 2D 工程图，不做 3D CAD 转换（见下方 Platform Support 注） |
 
 ## Platform Support
 
-| 能力 | macOS arm64 | macOS x86_64 | Linux x86_64 | Windows x86_64 |
-|------|-------------|--------------|--------------|----------------|
-| 解析 DXF | ✅ | ✅ | ✅ | ✅ |
-| DWG→DXF（ODA） | ✅ | ✅ | ✅（需安装 ODA Linux 版） | ✅（需安装 ODA Win 版） |
-| 字体解码（SHX） | ✅ | ✅ | ✅ | ✅ |
+| 能力            | macOS arm64 | macOS x86_64 | Linux x86_64              | Windows x86_64          |
+| --------------- | ----------- | ------------ | ------------------------- | ----------------------- |
+| 解析 DXF        | ✅          | ✅           | ✅                        | ✅                      |
+| DWG→DXF（ODA）  | ✅          | ✅           | ✅（需安装 ODA Linux 版） | ✅（需安装 ODA Win 版） |
+| 字体解码（SHX） | ✅          | ✅           | ✅                        | ✅                      |
 
 > 注：本 skill 与 NVIDIA `usd-convert-cad`（用于 3D CAD→USD 仿真）定位不同——本 skill 专注 2D 工程图（DWG/DXF）的文本/几何解析，不处理 3D 实体建模或仿真就绪资产。二者互补而非替代。
 
 ## Implementation Contract
 
-- **唯一入口**：`scripts/dwg_read.py <文件> [选项]`，返回码 `0` 表示成功，非 0 表示失败。
-- **输出契约**：默认打印 Markdown 报告到 stdout；`--out` 写入文件并打印进度到 stderr。
-- **降级行为**：若 ezdxf 严格解析失败（缺 EOF / 损坏），`dwg_read.py` 自动降级为流式提取，报告顶部出现 `⚠️` 提示，文字提取仍可用。
+- **入口**：装好后用 `dwg-reader read <文件> [选项]`；免安装用 `scripts/dwg_read.py <文件> [选项]`。
+  两者返回码 `0` 表示成功，非 0 表示失败。
+- **输出契约**：默认打印 Markdown 报告到 stdout；`-o` / `--out` 写入文件并打印进度到 stderr；
+  `--format json` 输出机器可读 JSON。
+- **降级行为**：内置流式解析器容忍缺 EOF / 多余 SECTION / 空值等不规范文件，一般无需降级分支；
+  ezdxf 路径（`inspect`）失败时改用 `read`。
 - **DWG 副作用**：处理 `.dwg` 会在源文件同目录落一个同名 `.dxf`（预期行为，非报错）。
+- **算量导出**：`dwg-reader quantity <文件> -o 算量.csv|xlsx`，含构件清单、图层几何量与尺寸清单。
 - **底层脚本**：`parse_dxf.py` / `extract_texts_stream.py` / `extract_dimensions.py` / `identify_components.py` 均为返回码驱动的 CLI，可被外部调用。
 - **可选集成**：需要 OpenSCAD、OpenCAD 或 MCP 时先读取
   [references/integrations.md](references/integrations.md)，再运行 `dwg-reader doctor`。
 
 ## Troubleshooting
 
-| 现象 | 原因 | 处理 |
-|------|------|------|
-| `未找到 ODA File Converter` | ODA 未安装或路径不符 | 安装 ODA（见 Prerequisites），或传 `.dxf` 并加 `--no-convert` |
-| `DXF 解析失败（missing EOF tag）` | 文件缺 EOF | 自动降级流式提取；结果见 `⚠️` 提示下文字章节 |
-| 中文全变 `?` / 乱码 | 字体未匹配 | 加 `--font fonts/gbcbig.shx` 强制指定；或检查 `fonts/index.json` |
-| 报告全空（实体数 0） | 内容在匿名块定义内 | 已自动补提取未引用块文字；若仍空，文件可能无文字实体 |
-| DWG 转换卡住 / 弹窗 | ODA 参数不完整 | 不应手动调 ODA；统一用 `dwg_read.py` 入口 |
-| `未安装 ezdxf` | 环境缺包 | `pip3 install ezdxf` |
+| 现象                              | 原因                 | 处理                                                             |
+| --------------------------------- | -------------------- | ---------------------------------------------------------------- |
+| `未找到 ODA File Converter`       | ODA 未安装或路径不符 | 安装 ODA（见 Prerequisites），或传 `.dxf` 并加 `--no-convert`    |
+| `DXF 解析失败（missing EOF tag）` | 文件缺 EOF           | 自动降级流式提取；结果见 `⚠️` 提示下文字章节                     |
+| 中文全变 `?` / 乱码               | 字体未匹配           | 加 `--font fonts/gbcbig.shx` 强制指定；或检查 `fonts/index.json` |
+| 报告全空（实体数 0）              | 内容在匿名块定义内   | 已自动补提取未引用块文字；若仍空，文件可能无文字实体             |
+| DWG 转换卡住 / 弹窗               | ODA 参数不完整       | 不应手动调 ODA；统一用 `dwg_read.py` 入口                        |
+| `未安装 ezdxf`                    | 环境缺包             | `pip3 install ezdxf`                                             |
 
 ## 概述
 
-| 项目 | 内容 |
-|------|------|
-| **能力名称** | DWG 图纸阅读与解析 |
+| 项目         | 内容                                                                                |
+| ------------ | ----------------------------------------------------------------------------------- |
+| **能力名称** | DWG 图纸阅读与解析                                                                  |
 | **核心功能** | 读取 DWG/DXF 图纸，提取图层、实体、文字标注、尺寸信息，输出结构化解析报告供阅读理解 |
-| **输入** | DWG 或 DXF 文件路径 |
-| **输出** | 结构化解析报告（实体清单、文字提取、图层列表、尺寸信息） |
-| **依赖** | ODA File Converter（DWG→DXF）+ ezdxf（解析） |
+| **输入**     | DWG 或 DXF 文件路径                                                                 |
+| **输出**     | 结构化解析报告（实体清单、文字提取、图层列表、尺寸信息）                            |
+| **依赖**     | ODA File Converter（DWG→DXF）+ ezdxf（解析）                                        |
 
 ## 工作原理
 
@@ -98,13 +103,13 @@ DWG (二进制) → [ODA File Converter] → DXF (纯文本) → [ezdxf] → 解
 
 ## 环境依赖
 
-| 组件 | 路径/版本 | 状态 |
-|------|-----------|------|
-| ODA File Converter | `/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter` | 已安装 |
-| Python | python3 (3.13+) | 已安装 |
-| ezdxf | pip 包，v1.4+ | 已安装 |
-| SHX 大字体解析器 | 内置 `scripts/shxfont.py`（自研，仅依赖 Python 标准库，无需第三方包） | 已内置 |
-| 中文字体库 | `fonts/`（322 个 SHX，含 index.json 编码索引） | 已内置 |
+| 组件               | 路径/版本                                                             | 状态   |
+| ------------------ | --------------------------------------------------------------------- | ------ |
+| ODA File Converter | `/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter`  | 已安装 |
+| Python             | python3 (3.13+)                                                       | 已安装 |
+| ezdxf              | pip 包，v1.4+                                                         | 已安装 |
+| SHX 大字体解析器   | 内置 `scripts/shxfont.py`（自研，仅依赖 Python 标准库，无需第三方包） | 已内置 |
+| 中文字体库         | `fonts/`（322 个 SHX，含 index.json 编码索引）                        | 已内置 |
 
 > 如果 ezdxf 未安装，执行：`pip3 install ezdxf`
 > 如果 ODA 未安装，从 https://www.opendesign.com/guestfiles/oda_file_converter 下载 macOS arm64 dmg，拖入 /Applications，并执行 `xattr -dr com.apple.quarantine "/Applications/ODAFileConverter.app"`。
@@ -142,6 +147,7 @@ dwg2dxf("input.dwg", "output.dxf")
 ## 解析脚本
 
 项目内置脚本位于 `scripts/` 目录：
+
 - `dwg_read.py` — **一站式流水线**（推荐）：自动 DWG→DXF 转换 + 结构化报告 + 文字提取 + 可选尺寸精读 / 构件识别 / 批量处理，输出 Markdown 报告
 - `parse_dxf.py` — 解析 DXF 并输出结构化报告（实体清单、文字、图层、块、尺寸），支持 `--layer-filter`
 - `extract_texts_stream.py` — 流式提取全部文字（低内存），支持 BigFont 解码、块展开、表格/图层聚合、`--layer-filter` / `--layer-alias`
@@ -158,6 +164,22 @@ dwg2dxf("input.dwg", "output.dxf")
 ### 一站式流水线（推荐）
 
 ```bash
+# 工程化 CLI（需 pip install -e .）
+dwg-reader read <图纸.dwg|图纸.dxf> [-o 报告.md] [--format json]
+                [--table] [--by-layer] [--no-convert] [--font 字体.shx]
+                [--dimensions] [--components]
+                [--layer-filter "WALL|BEAM"] [--layer-alias 别名.json]
+
+# 批量
+dwg-reader read --batch <目录> --out-dir <输出目录> [--recursive]
+
+# 算量导出（构件清单 + 图层几何量 + 尺寸清单）
+dwg-reader quantity <图纸> -o 算量.csv
+dwg-reader quantity <图纸> -o 算量.xlsx --sections components,layers
+```
+
+```bash
+# 免安装脚本入口（能力等价）
 # 单文件（DWG 或 DXF 均可，DWG 自动转 DXF）
 python3 scripts/dwg_read.py <图纸.dwg|图纸.dxf> [--out 报告.md]
                       [--table] [--by-layer] [--no-convert] [--font 字体.shx]
@@ -230,11 +252,11 @@ for y, x, t in texts:
 
 英文/数字/符号完整支持，分三种情况：
 
-| 文本类型 | 存储方式 | 解码方式 |
-|---------|---------|---------|
-| 纯英文/数字（ASCII） | 直存 | 原样输出，无需解码 |
-| 西文字体字符（unifont） | `\U+XXXX` | `chr(int(XXXX, 16))` |
-| 中文字符（bigfont） | `\M+5XXXX` | SHX 字体映射表（gbk 等） |
+| 文本类型                | 存储方式   | 解码方式                 |
+| ----------------------- | ---------- | ------------------------ |
+| 纯英文/数字（ASCII）    | 直存       | 原样输出，无需解码       |
+| 西文字体字符（unifont） | `\U+XXXX`  | `chr(int(XXXX, 16))`     |
+| 中文字符（bigfont）     | `\M+5XXXX` | SHX 字体映射表（gbk 等） |
 
 - **ASCII 直存**：`HELLO WORLD 123`、`GB50017-2017`、`kN/m`、`MPa` 等原样提取
 - **Unicode 码点**：`\U+0041`→A、`\U+00D7`→×（乘号）、`\U+006D2`→m²、`\U+00A0`→不换行空格
@@ -248,14 +270,14 @@ for y, x, t in texts:
 
 **1. AutoCAD `%%` 转义序列**（自动解码，大小写不敏感）
 
-| 转义 | 符号 | 含义 |
-|------|------|------|
-| `%%C`/`%%c` | `Ø` | 直径（如 `%%C20` → `Ø20`） |
-| `%%D`/`%%d` | `°` | 度（如 `45%%d` → `45°`） |
-| `%%P`/`%%p` | `±` | 正负（如 `%%P0.5` → `±0.5`） |
-| `%%%` | `%` | 百分号 |
-| `%%u`/`%%o` | （移除标记） | 下划线/上划线开-关 |
-| `%%数字` | 单字节字符 | 如 `%%130` → `\x82` |
+| 转义        | 符号         | 含义                         |
+| ----------- | ------------ | ---------------------------- |
+| `%%C`/`%%c` | `Ø`          | 直径（如 `%%C20` → `Ø20`）   |
+| `%%D`/`%%d` | `°`          | 度（如 `45%%d` → `45°`）     |
+| `%%P`/`%%p` | `±`          | 正负（如 `%%P0.5` → `±0.5`） |
+| `%%%`       | `%`          | 百分号                       |
+| `%%u`/`%%o` | （移除标记） | 下划线/上划线开-关           |
+| `%%数字`    | 单字节字符   | 如 `%%130` → `\x82`          |
 
 **2. `\U+XXXX` Unicode 符号**：`\U+00B1`→±、`\U+00B0`→°、`\U+00D7`→×、`\U+00B2`→²、`\U+00B3`→³、`\U+00B5`→µ
 
@@ -317,6 +339,7 @@ python3 scripts/extract_texts_stream.py 图纸.dxf out.txt --font fonts/gbcbig.s
 
 `fonts/` 目录内置 322 个 SHX 字体（约 159MB，来自 AutoCAD SHX 字体集合），
 含 `index.json` 索引（字体名 → 类型/编码/shape 数）：
+
 - bigfont 234 个：中文 GBK（gbcbig/hztxt/tssdchn 等）、韩文 cp949、日文 shift_jis
 - unifont 88 个：Unicode 编码（tssdeng 等）
 - 支持常见别名：gbcbig/hztxt/tssdchn/tssdeng 等，大小写不敏感，自动补 `.shx`
@@ -425,7 +448,9 @@ python3 scripts/dwg_read.py --batch /path/to/drawings --out-dir /path/to/reports
 ## 解析输出内容
 
 ### 1. 实体清单（Entities）
+
 模型空间中所有实体，按类型统计并列出关键属性：
+
 - `LINE`: 起点/终点坐标
 - `CIRCLE`: 圆心/半径
 - `ARC`: 圆心/半径/起始角度/终止角度
@@ -435,12 +460,15 @@ python3 scripts/dwg_read.py --batch /path/to/drawings --out-dir /path/to/reports
 - `INSERT`(块引用): 块名/插入点/缩放/旋转
 
 ### 2. 文字提取（Texts）
+
 提取图纸中所有文字标注（TEXT + MTEXT），用于理解图纸含义。MTEXT 需要解析内嵌格式代码（`\A`、`\P`、`\f` 等）。
 
 ### 3. 图层信息（Layers）
+
 图层名、颜色、线型、开关/冻结状态、可见性。
 
 ### 4. 尺寸信息
+
 DIMENSION 实体的测量值，对应图纸的尺寸标注。
 
 ## 注意事项

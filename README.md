@@ -22,26 +22,54 @@
 - **构件识别**：`--components` 按块名/图层规则匹配门/窗/梁/柱/钢筋/楼梯/设备/道路/渠道等 26 类构件，规则可扩展
 - **图层智能过滤**：`--layer-filter "WALL|BEAM"` + `--layer-alias 别名.json`，仅保留匹配图层的内容
 - **批量处理**：`--batch <目录> --out-dir <目录>` 一次处理多张图纸，生成总览 index.md
-- **可选 CAD 后端**：`dwg-reader doctor` 探测 ODA、LibreDWG、OpenSCAD、OpenCAD
+- **可选 CAD 后端**：`dwg-reader doctor` 探测 ODA、LibreDWG、OpenSCAD、OpenCAD（Windows/macOS/Linux 自动扫描安装路径）
 - **OpenSCAD 桥接**：二维 DXF 按高度/图层拉伸并导出 STL、3MF、OFF
-- **MCP 服务**：通过 stdio MCP 暴露诊断、文字提取、结构检查和显式网格导出
+- **MCP 服务**：通过 stdio MCP 暴露诊断、文字提取、结构检查、一站式阅读、算量与显式网格导出
+- **算量清单导出**：构件数量 + 图层几何量（直线/多段线总长、圆/弧/文字数）→ CSV（Excel 友好）或 XLSX
+- **工程化 CLI**：`dwg-reader read` 一站式 Markdown/JSON 报告，`dwg-reader quantity` 算量导出，无需手写脚本
+- **零依赖内核**：流式 DXF 解析器仅用标准库，未装 ezdxf 也能出完整报告
+- **天正（TCH）图纸检测**：自动识别 `TCH_*` 自定义对象与代理实体，报告顶部告警并给出「图形导出/T3」处理建议；支持 `.t3` / `.dwt` 输入
 
 ## 环境依赖
 
-| 组件 | 说明 |
-|------|------|
-| ODA File Converter | `/Applications/ODAFileConverter.app`，DWG→DXF 转换 |
-| Python 3.13+ | 运行脚本 |
-| ezdxf | `pip3 install ezdxf` |
-| SHX 解析器 | 内置 `scripts/shxfont.py`（自研，仅依赖标准库，无需第三方包） |
-| OpenSCAD / OpenCAD | 可选本地后端，使用 `dwg-reader doctor` 探测 |
+| 组件               | 说明                                                                                                                                                                               |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ODA File Converter | DWG→DXF 转换；Windows 装到 `C:\Program Files\ODA\ODAFileConverter <版本>\ODAFileConverter.exe`，macOS 为 `.app` 包，Linux 一般在 `/usr/bin`；也可用 `DWG_READER_ODA_PATH` 显式指定 |
+| Python 3.10+       | 运行脚本与 CLI                                                                                                                                                                     |
+| ezdxf（可选）      | `pip install 'dwg-reader-skill[dxf]'`；仅 `inspect`/`text --expand-blocks` 与旧脚本需要                                                                                            |
+| openpyxl（可选）   | `pip install 'dwg-reader-skill[xlsx]'`；仅 XLSX 导出需要                                                                                                                           |
+| SHX 解析器         | 内置 `src/dwg_reader/fonts.py`（自研，仅依赖标准库）                                                                                                                               |
+| OpenSCAD / OpenCAD | 可选本地后端，使用 `dwg-reader doctor` 探测                                                                                                                                        |
 
 ## 快速开始
 
 ### 0. 一站式阅读（推荐）
 
 ```bash
-# DWG 或 DXF 均可，DWG 自动转为同目录 DXF 后解析
+pip install -e ".[dxf]"        # Windows/macOS/Linux 通用
+
+# 工程化 CLI（推荐，等价能力，输出更规整）
+dwg-reader read 图纸.dwg                    # Markdown 报告到 stdout
+dwg-reader read 图纸.dxf -o 报告.md          # 写入文件
+dwg-reader read 图纸.dxf --table             # 表格还原
+dwg-reader read 图纸.dxf --by-layer          # 按图层聚合
+dwg-reader read 图纸.dxf --dimensions        # 尺寸标注精读
+dwg-reader read 图纸.dxf --components        # 构件识别
+dwg-reader read 图纸.dxf --layer-filter "WALL|BEAM"
+dwg-reader read 图纸.dxf --format json       # 机器可读
+
+dwg-reader read --batch ./drawings --out-dir ./reports   # 批量 + index.md
+dwg-reader read --batch ./drawings --out-dir ./reports --recursive
+
+dwg-reader quantity 图纸.dxf -o 算量.csv      # 构件+图层几何量+尺寸
+dwg-reader quantity 图纸.dxf -o 算量.xlsx --sections components,layers
+
+dwg-reader doctor                             # 探测 ODA / ezdxf / OpenSCAD
+dwg-reader doctor --format json
+```
+
+```bash
+# 脚本入口（无需 pip 安装，功能等价）
 python3 scripts/dwg_read.py 图纸.dwg --out 报告.md
 python3 scripts/dwg_read.py 图纸.dxf --table          # 表格还原
 python3 scripts/dwg_read.py 图纸.dxf --by-layer       # 按图层聚合
@@ -49,19 +77,36 @@ python3 scripts/dwg_read.py 图纸.dxf --dimensions     # 尺寸标注精读
 python3 scripts/dwg_read.py 图纸.dxf --components     # 构件识别
 python3 scripts/dwg_read.py 图纸.dxf --layer-filter "WALL|BEAM"  # 按图层过滤
 python3 scripts/dwg_read.py --batch ./drawings --out-dir ./reports  # 批量
+```
 
-# 工程化 CLI / 可选后端 / MCP
-dwg-reader doctor --format json
-dwg-reader openscad profile.dxf model.stl --height 12 --layer CUT
-dwg-reader-mcp  # 先安装 .[dxf,mcp]
+### 0.1 作为 Python 库调用
+
+```python
+from dwg_reader import ReadOptions, read_drawing, build_quantity
+
+result = read_drawing("图纸.dxf", ReadOptions(dimensions=True, components=True))
+print(result.markdown)          # Markdown 报告
+print(result.payload["texts"])  # 结构化文字
+
+quantity = build_quantity("图纸.dxf")
+quantity.sheets()               # {"components": [...], "layers": [...], "dimensions": [...]}
 ```
 
 ### 1. 转换 DWG → DXF
 
 ```bash
+# macOS
 ODA="/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter"
+# Windows
+# ODA="C:/Program Files/ODA/ODAFileConverter 26.4.0/ODAFileConverter.exe"
+# Linux
+# ODA="/usr/bin/ODAFileConverter"
+
 mkdir -p out
 "$ODA" input_dir out ACAD2018 DXF 0 0 "*.dwg"
+
+# 或交给 CLI 自动探测并转换
+dwg-reader convert 图纸.dwg ./out
 ```
 
 ### 2. 提取文字（自动匹配字体）
@@ -89,27 +134,49 @@ python3 scripts/extract_texts_stream.py 图纸.dxf out.txt --font fonts/gbcbig.s
 python3 scripts/shx_decompile.py fonts/gbcbig.shx /tmp/gbcbig.shp
 ```
 
-## 字体库
+## 天正（TCH）图纸与 T3 格式
 
+天正建筑/结构把墙、门窗、轴号、标注等存为自定义对象（`TCH_*` 类）。
+DWG→DXF 转换后这些对象变成 **`ACAD_PROXY_ENTITY` 代理实体**，只保留显示缓存，
+**文字内容不可恢复**。本工具会自动检测并告警：
+
+```
+> ⚠️ 天正图纸警告：天正对象未展开：3784 个代理实体/对象无法解析（占 87%），
+> 天正文字、轴号、门窗编号、尺寸等可能大量缺失。
+```
+
+报告末尾的「天正图纸检测」章节会列出受影响对象（`TCH_TEXT`、`TCH_AXIS_LABEL`、
+`TCH_DIMENSION` 等）与处理建议。JSON 输出对应 `tianzheng` 字段。
+
+**让天正图纸变得可读**（任选其一）：
+
+1. 天正中打开原图 →「文件布图 → 图形导出」，格式选 **AutoCAD/T3**（会把天正对象炸开为基本实体）；
+2. 在 CAD/天正中 `EXPLODE`（分解）天正对象后另存为 DXF；
+3. 用天正批量导出为低版本 DWG，再交给本工具。
+
+`.t3` / `.dwt` 文件本质是 Autodesk DWG 容器，`dwg-reader read 图纸.t3` 可直接处理。
+若天正对象未炸开，同样会得到上述告警。
+
+## 字体库
 `fonts/` 目录内置 322 个 SHX 字体，含 `index.json` 索引（字体名 → 类型/编码/shape 数）。
 
-| 编码 | 数量 | 说明 |
-|------|------|------|
-| gbk | 198 | 中文简体（gbcbig/hztxt/tssdchn 等） |
-| unicode | 88 | unifont 西文字体（tssdeng 等） |
-| cp949 | 28 | 韩文（KORdansun 等） |
-| shift_jis | 6 | 日文（hsa 等） |
-| ascii | 2 | 纯 ASCII |
+| 编码      | 数量 | 说明                                |
+| --------- | ---- | ----------------------------------- |
+| gbk       | 198  | 中文简体（gbcbig/hztxt/tssdchn 等） |
+| unicode   | 88   | unifont 西文字体（tssdeng 等）      |
+| cp949     | 28   | 韩文（KORdansun 等）                |
+| shift_jis | 6    | 日文（hsa 等）                      |
+| ascii     | 2    | 纯 ASCII                            |
 
 ## 解码原理
 
 DXF 文本中字符的三种存储方式：
 
-| 类型 | 存储方式 | 解码方式 |
-|------|---------|---------|
-| 纯 ASCII | 直存 | 原样输出 |
-| 西文字体 | `\U+XXXX` | `chr(int(XXXX, 16))` |
-| 中文字体 | `\M+5XXXX` | SHX 字体映射表 |
+| 类型     | 存储方式   | 解码方式             |
+| -------- | ---------- | -------------------- |
+| 纯 ASCII | 直存       | 原样输出             |
+| 西文字体 | `\U+XXXX`  | `chr(int(XXXX, 16))` |
+| 中文字体 | `\M+5XXXX` | SHX 字体映射表       |
 
 关键结论：bigfont 索引表 shape number = 该字体的字符编码。DXF 中 `\M+5BAA3` 去掉前导 `5` 后为 `0xBAA3` = GBK 码 = 「海」。
 
@@ -119,8 +186,20 @@ DXF 文本中字符的三种存储方式：
 dwg-reader-skill/
 ├── SKILL.md              # 技能说明（NVIDIA 风格范式）
 ├── AGENT.md             # 面向 AI Agent 的操作手册
-├── README.md            # 本文档
-├── scripts/
+├── README.md             # 本文档
+├── src/dwg_reader/       # 可安装包（pip install -e .）
+│   ├── dxf.py            # 流式 DXF 模型解析（零依赖，容错损坏文件）
+│   ├── text.py           # \U+ / \M+5 / %% / \S 堆叠解码
+│   ├── fonts.py          # SHX 字体索引与自动匹配
+│   ├── layout.py         # 阅读顺序、分栏、表格还原
+│   ├── dimensions.py     # 尺寸标注精读 + 关联几何
+│   ├── components.py     # 构件识别（26 类内置规则）
+│   ├── pipeline.py       # 一站式报告 + 批量
+│   ├── quantity.py       # 算量清单（CSV/XLSX）
+│   ├── backends.py       # 跨平台 ODA/LibreDWG/OpenSCAD 探测
+│   ├── cli.py            # dwg-reader 命令
+│   └── mcp_server.py     # MCP stdio 服务
+├── scripts/              # 免安装脚本入口（与包能力等价）
 │   ├── dwg_read.py           # 一站式流水线（推荐入口）
 │   ├── parse_dxf.py          # 结构化解析（实体/文字/图层/尺寸/块，支持 --layer-filter）
 │   ├── extract_texts_stream.py # 流式文字提取（低内存，自动字体匹配，支持图层过滤）

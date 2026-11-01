@@ -11,3 +11,7 @@ dist/
 
 # macOS
 .DS_Store
+
+# local test artifacts
+.local-test/
+
